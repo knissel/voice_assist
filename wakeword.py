@@ -1,0 +1,205 @@
+import pyaudio
+import struct
+import pvporcupine
+import io
+import wave
+import json
+import subprocess
+import os
+import pyttsx3
+from google import genai
+from google.genai import types
+from control4_tool import control_home_lighting
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Initialize text-to-speech engine
+tts_engine = pyttsx3.init()
+
+# Get available voices and select a better one
+voices = tts_engine.getProperty('voices')
+# Try to use a more natural voice (Alex, Samantha, or Daniel on macOS)
+for voice in voices:
+    if 'daniel' in voice.name.lower() or 'alex' in voice.name.lower():
+        tts_engine.setProperty('voice', voice.id)
+        break
+
+tts_engine.setProperty('rate', 165)  # Slightly slower for clarity
+tts_engine.setProperty('volume', 0.95)  # Volume (0.0 to 1.0)
+
+# Initialize Gemini client
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+# Define the tool for Gemini
+home_tool = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="control_home_lighting",
+            description="Controls home lights. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={
+                    "device_id": types.Schema(type="INTEGER", description="The device ID of the light to control"),
+                    "brightness": types.Schema(type="INTEGER", description="Brightness level 0-100")
+                },
+                required=["device_id", "brightness"]
+            )
+        )
+    ]
+)
+
+def capture_and_process():
+    # 1. Feedback to user (Optional: Play a local 'ding' file here)
+    print("🎤 Jarvis is listening...")
+
+    # 2. Record the command (4 seconds is usually enough for a home command)
+    RECORD_SECONDS = 4
+    CHUNK = 1024
+    RATE = 16000 # Gemini handles 16k perfectly
+    
+    frames = []
+    # We use the existing 'pa' and 'audio_stream' if shared, 
+    # but for simplicity, let's capture a fresh burst:
+    temp_stream = pa.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
+    
+    for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+        data = temp_stream.read(CHUNK)
+        frames.append(data)
+    
+    temp_stream.stop_stream()
+    temp_stream.close()
+
+    # 3. Save audio to temporary WAV file for Whisper
+    temp_audio_path = "/tmp/jarvis_command.wav"
+    with wave.open(temp_audio_path, 'wb') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(pa.get_sample_size(pyaudio.paInt16))
+        wf.setframerate(RATE)
+        wf.writeframes(b''.join(frames))
+    
+    # 4. Transcribe with Whisper.cpp
+    print("🎧 Transcribing with Whisper...")
+    whisper_path = os.getenv("WHISPER_PATH", "/Users/kennynissel/voice_assist/whisper.cpp/build/bin/whisper-cli")
+    model_path = os.getenv("MODEL_PATH", "/Users/kennynissel/voice_assist/whisper.cpp/models/ggml-tiny.bin")
+    
+    result = subprocess.run(
+        [whisper_path, "-m", model_path, "-f", temp_audio_path, "-nt"],
+        capture_output=True,
+        text=True
+    )
+    
+    # Extract transcribed text from output
+    user_command = result.stdout.strip()
+    if user_command:
+        # Clean up the output - whisper sometimes adds timestamps
+        lines = user_command.split('\n')
+        # Get the last non-empty line which is usually the transcription
+        user_command = next((line.strip() for line in reversed(lines) if line.strip() and not line.startswith('[')), "")
+    
+    if not user_command:
+        print("❌ No speech detected")
+        return
+    
+    print(f"📝 You said: {user_command}")
+    
+    # 5. Send to Gemini
+    print("🧠 Consulting Gemini Flash...")
+    
+    # Detect if this is a lighting command
+    lighting_keywords = ['light', 'lights', 'lamp', 'brightness', 'dim', 'bright', 'kitchen', 'family room', 'foyer', 'stairs', 'island']
+    is_lighting_command = any(keyword in user_command.lower() for keyword in lighting_keywords)
+    
+    try:
+        system_instruction = "You are Jarvis. For lighting commands, IMMEDIATELY call control_home_lighting function with NO explanation. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89. For non-lighting questions, answer in 1-2 sentences max."
+        
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-exp",
+            contents=user_command,
+            config=types.GenerateContentConfig(
+                tools=[home_tool],
+                system_instruction=system_instruction,
+                temperature=0.1
+            )
+        )
+        
+        # 6. Execute Tool Call or Respond
+        if response.candidates and response.candidates[0].content.parts:
+            has_tool_call = False
+            for part in response.candidates[0].content.parts:
+                if part.function_call:
+                    has_tool_call = True
+                    print(f"✅ Action: {part.function_call.name}")
+                    args = dict(part.function_call.args)
+                    result = control_home_lighting(
+                        args["device_id"], 
+                        args["brightness"]
+                    )
+                    print(f"📡 Result: {result}")
+            
+            if has_tool_call:
+                tts_engine.say("Done")
+                tts_engine.runAndWait()
+            elif response.text:
+                print(f"💬 Jarvis: {response.text}")
+                tts_engine.say(response.text)
+                tts_engine.runAndWait()
+    
+    except Exception as e:
+        print(f"❌ Gemini API failed: {e}")
+        error_msg = "I'm having trouble connecting to my brain."
+        tts_engine.say(error_msg)
+        tts_engine.runAndWait()
+
+# 1. Setup the Engine
+# 'keywords' can be standard ones like ['jarvis', 'computer']
+# or a path to your custom 'Gemini.ppn' file.
+access_key = os.getenv("PORCUPINE_ACCESS_KEY")
+porcupine = pvporcupine.create(
+    access_key=access_key,
+    keywords=['americano', 'computer'] 
+)
+
+# 2. Setup the Microphone Stream
+pa = pyaudio.PyAudio()
+audio_stream = pa.open(
+    rate=porcupine.sample_rate,
+    channels=1,
+    format=pyaudio.paInt16,
+    input=True,
+    frames_per_buffer=porcupine.frame_length
+)
+
+print("Listening... (Press Ctrl+C to exit)")
+
+# 3. The "Infinite Ear" Loop
+try:
+    while True:
+        # Read a tiny chunk of audio (approx 0.03 seconds worth)
+        pcm = audio_stream.read(porcupine.frame_length)
+        
+        # Unpack bits to match Porcupine's expected format
+        pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)
+
+        # Process the chunk
+        keyword_index = porcupine.process(pcm)
+
+        # 4. Wake Word Detected!
+        if keyword_index >= 0:
+            print("Wake word detected! (Robot)")
+            capture_and_process()  # Now using local LM Studio!
+            # --- ACTION TAKEN HERE ---
+            # 1. Pause any music playing
+            # 2. Play a 'ding' sound (feedback)
+            # 3. Start recording the NEXT 5 seconds of audio for Gemini
+            # 4. Send that new audio to Gemini Flash 3
+            # -------------------------
+
+except KeyboardInterrupt:
+    if porcupine is not None:
+        porcupine.delete()
+    if audio_stream is not None:
+        audio_stream.close()
+    if pa is not None:
+        pa.terminate()

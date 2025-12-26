@@ -1,0 +1,7 @@
+google-genai
+pyaudio
+pvporcupine
+pyttsx3
+pynput
+requests
+python-dotenv
