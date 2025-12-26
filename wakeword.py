@@ -81,8 +81,17 @@ def capture_and_process():
     
     # 4. Transcribe with Whisper.cpp
     print("🎧 Transcribing with Whisper...")
-    whisper_path = os.getenv("WHISPER_PATH", "/Users/kennynissel/voice_assist/whisper.cpp/build/bin/whisper-cli")
-    model_path = os.getenv("MODEL_PATH", "/Users/kennynissel/voice_assist/whisper.cpp/models/ggml-tiny.bin")
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    default_whisper_path = os.path.join(repo_root, "whisper.cpp", "build", "bin", "whisper-cli")
+    default_model_path = os.path.join(repo_root, "whisper.cpp", "models", "ggml-tiny.bin")
+
+    def resolve_path(env_value: str | None, default_path: str) -> str:
+        if env_value and os.path.exists(env_value):
+            return env_value
+        return default_path
+
+    whisper_path = resolve_path(os.getenv("WHISPER_PATH"), default_whisper_path)
+    model_path = resolve_path(os.getenv("MODEL_PATH"), default_model_path)
     
     result = subprocess.run(
         [whisper_path, "-m", model_path, "-f", temp_audio_path, "-nt"],
@@ -114,8 +123,9 @@ def capture_and_process():
     try:
         system_instruction = "You are Jarvis. For lighting commands, IMMEDIATELY call control_home_lighting function with NO explanation. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89. For non-lighting questions, answer in 1-2 sentences max."
         
+        model_name = os.getenv("MODEL_NAME", "gemini-1.5-flash")
         response = client.models.generate_content(
-            model="gemini-2.0-flash-exp",
+            model=model_name,
             contents=user_command,
             config=types.GenerateContentConfig(
                 tools=[home_tool],
