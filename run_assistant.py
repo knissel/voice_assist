@@ -145,7 +145,7 @@ def llm_respond_or_tool_call(user_text):
     return ""
 
 def speak(text):
-    """Speak text using Gemini 2.5 Flash TTS."""
+    """Speak text using Gemini 2.5 Flash TTS with direct playback."""
     if text:
         print(f"💬 {text}")
         response = client.models.generate_content(
@@ -164,15 +164,16 @@ def speak(text):
         )
         
         audio_data = response.candidates[0].content.parts[0].inline_data.data
-        audio_path = "/tmp/tts_output.wav"
         
-        with wave.open(audio_path, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(24000)
-            wf.writeframes(audio_data)
-        
-        subprocess.run(["afplay", audio_path], check=False)
+        p = pyaudio.PyAudio()
+        stream = p.open(format=pyaudio.paInt16,
+                       channels=1,
+                       rate=24000,
+                       output=True)
+        stream.write(audio_data)
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
 
 # === MAIN LOOP ===
 def on_press(key):

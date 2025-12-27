@@ -122,7 +122,7 @@ def capture_and_process():
         speak_tts(error_msg)
 
 def speak_tts(text):
-    """Speak text using Gemini 2.5 Flash TTS."""
+    """Speak text using Gemini 2.5 Flash TTS with direct playback."""
     if text:
         response = client.models.generate_content(
             model="gemini-2.5-flash-preview-tts",
@@ -140,15 +140,16 @@ def speak_tts(text):
         )
         
         audio_data = response.candidates[0].content.parts[0].inline_data.data
-        audio_path = "/tmp/tts_output.wav"
         
-        with wave.open(audio_path, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(24000)
-            wf.writeframes(audio_data)
-        
-        play_audio(audio_path)
+        p = pyaudio.PyAudio()
+        stream = p.open(format=pyaudio.paInt16,
+                       channels=1,
+                       rate=24000,
+                       output=True)
+        stream.write(audio_data)
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
 
 def play_audio(audio_path: str) -> None:
     """Play an audio file using the first available system player."""
