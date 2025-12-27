@@ -11,6 +11,7 @@ import subprocess
 import json
 import os
 import pyttsx3
+from typing import Optional
 from google import genai
 from google.genai import types
 from tools.registry import GEMINI_TOOLS, dispatch_tool
@@ -23,7 +24,7 @@ REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_WHISPER_PATH = os.path.join(REPO_ROOT, "whisper.cpp", "build", "bin", "whisper-cli")
 DEFAULT_MODEL_PATH = os.path.join(REPO_ROOT, "whisper.cpp", "models", "ggml-tiny.bin")
 
-def _resolve_path(env_value: str | None, default_path: str) -> str:
+def _resolve_path(env_value: Optional[str], default_path: str) -> str:
     """Prefer env path when it exists; otherwise fall back to repo default."""
     if env_value and os.path.exists(env_value):
         return env_value
@@ -38,7 +39,7 @@ RATE = int(os.getenv("MIC_RATE", "16000"))
 CHUNK = 1024
 MIC_DEVICE_INDEX = os.getenv("MIC_DEVICE_INDEX")
 
-def _parse_mic_device_index(value: str | None) -> int | None:
+def _parse_mic_device_index(value: Optional[str]) -> Optional[int]:
     if not value:
         return None
     try:
