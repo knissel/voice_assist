@@ -9,4 +9,6 @@ yt-dlp
 pyControl4
 piper-tts
 sounddevice
-numpy
+numpy<2.0.0
+torch
+silero-vad

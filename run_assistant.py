@@ -12,6 +12,7 @@ import json
 import os
 import numpy as np
 import sounddevice as sd
+import torch
 from typing import Optional
 from google import genai
 from google.genai import types
@@ -53,6 +54,16 @@ def _parse_mic_device_index(value: Optional[str]) -> Optional[int]:
 # === INITIALIZE ===
 client = genai.Client(api_key=GEMINI_API_KEY)
 
+# Initialize Silero VAD
+try:
+    vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', force_reload=False, onnx=False)
+    (get_speech_timestamps, _, read_audio, _, _) = utils
+    vad_available = True
+    print("✅ VAD initialized successfully")
+except Exception as e:
+    print(f"⚠️  VAD initialization failed: {e}. Using fixed recording duration.")
+    vad_available = False
+
 # Initialize Piper TTS
 DEFAULT_PIPER_MODEL = os.path.join(REPO_ROOT, "piper_models", "en_US-lessac-medium.onnx")
 PIPER_MODEL = os.getenv("PIPER_MODEL", DEFAULT_PIPER_MODEL)
@@ -64,7 +75,7 @@ else:
 
 # === PIPELINE FUNCTIONS ===
 def record_audio():
-    """Record audio from microphone."""
+    """Record audio from microphone with VAD."""
     print("🎤 Recording...")
     pa = pyaudio.PyAudio()
     device_index = _parse_mic_device_index(MIC_DEVICE_INDEX)
@@ -89,10 +100,67 @@ def record_audio():
             )
         else:
             raise exc
+    
     frames = []
-    for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-        data = stream.read(CHUNK)
-        frames.append(data)
+    
+    if vad_available:
+        # VAD-based recording
+        MAX_RECORD_SECONDS = 10
+        MIN_RECORD_SECONDS = 0.5
+        SILENCE_DURATION = 1.5
+        VAD_CHUNK = 512  # Silero VAD requires exactly 512 samples for 16kHz
+        
+        silence_chunks = 0
+        silence_threshold = int(SILENCE_DURATION * RATE / VAD_CHUNK)
+        max_chunks = int(MAX_RECORD_SECONDS * RATE / CHUNK)
+        min_chunks = int(MIN_RECORD_SECONDS * RATE / CHUNK)
+        
+        vad_buffer = np.array([], dtype=np.int16)
+        
+        for i in range(max_chunks):
+            try:
+                data = stream.read(CHUNK, exception_on_overflow=False)
+            except Exception as e:
+                print(f"⚠️  Audio read error: {e}")
+                break
+            
+            frames.append(data)
+            
+            # Add to VAD buffer
+            audio_int16 = np.frombuffer(data, dtype=np.int16)
+            vad_buffer = np.concatenate([vad_buffer, audio_int16])
+            
+            # Process VAD in 512-sample chunks
+            while len(vad_buffer) >= VAD_CHUNK:
+                vad_chunk = vad_buffer[:VAD_CHUNK]
+                vad_buffer = vad_buffer[VAD_CHUNK:]
+                
+                # Convert to tensor for VAD
+                audio_float32 = vad_chunk.astype(np.float32) / 32768.0
+                audio_tensor = torch.from_numpy(audio_float32)
+                
+                # Check for speech
+                try:
+                    speech_prob = vad_model(audio_tensor, RATE).item()
+                    
+                    if speech_prob < 0.5:
+                        silence_chunks += 1
+                    else:
+                        silence_chunks = 0
+                except Exception:
+                    # If VAD fails, just continue recording
+                    pass
+            
+            # Stop if we've had enough silence after minimum recording time
+            if i >= min_chunks and silence_chunks >= silence_threshold:
+                print(f"🛑 Speech ended (recorded {len(frames) * CHUNK / RATE:.1f}s)")
+                break
+    else:
+        # Fallback to fixed duration
+        for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+            data = stream.read(CHUNK)
+            frames.append(data)
+    
     stream.stop_stream()
     stream.close()
     

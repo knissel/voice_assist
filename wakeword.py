@@ -7,6 +7,7 @@ import os
 import shutil
 import numpy as np
 import sounddevice as sd
+import torch
 from google import genai
 from google.genai import types
 from piper.voice import PiperVoice
@@ -18,6 +19,16 @@ load_dotenv()
 # Initialize Gemini client
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=GEMINI_API_KEY)
+
+# Initialize Silero VAD
+try:
+    vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', force_reload=False, onnx=False)
+    (get_speech_timestamps, _, read_audio, _, _) = utils
+    vad_available = True
+    print("✅ VAD initialized successfully")
+except Exception as e:
+    print(f"⚠️  VAD initialization failed: {e}. Using fixed recording duration.")
+    vad_available = False
 
 # Initialize Piper TTS
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -33,19 +44,70 @@ def capture_and_process():
     # 1. Feedback to user (Optional: Play a local 'ding' file here)
     print("🎤 Jarvis is listening...")
 
-    # 2. Record the command (4 seconds is usually enough for a home command)
-    RECORD_SECONDS = 4
+    # 2. Record with VAD or fixed duration
     CHUNK = 1024
-    RATE = 16000 # Gemini handles 16k perfectly
+    RATE = 16000
+    MAX_RECORD_SECONDS = 10  # Maximum recording time
+    MIN_RECORD_SECONDS = 0.5  # Minimum recording time
+    SILENCE_DURATION = 1.5  # Seconds of silence to stop recording
     
     frames = []
-    # We use the existing 'pa' and 'audio_stream' if shared, 
-    # but for simplicity, let's capture a fresh burst:
     temp_stream = pa.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
     
-    for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-        data = temp_stream.read(CHUNK)
-        frames.append(data)
+    if vad_available:
+        # VAD-based recording
+        VAD_CHUNK = 512  # Silero VAD requires exactly 512 samples for 16kHz
+        silence_chunks = 0
+        silence_threshold = int(SILENCE_DURATION * RATE / VAD_CHUNK)
+        max_chunks = int(MAX_RECORD_SECONDS * RATE / CHUNK)
+        min_chunks = int(MIN_RECORD_SECONDS * RATE / CHUNK)
+        
+        vad_buffer = np.array([], dtype=np.int16)
+        
+        for i in range(max_chunks):
+            try:
+                data = temp_stream.read(CHUNK, exception_on_overflow=False)
+            except Exception as e:
+                print(f"⚠️  Audio read error: {e}")
+                break
+            
+            frames.append(data)
+            
+            # Add to VAD buffer
+            audio_int16 = np.frombuffer(data, dtype=np.int16)
+            vad_buffer = np.concatenate([vad_buffer, audio_int16])
+            
+            # Process VAD in 512-sample chunks
+            while len(vad_buffer) >= VAD_CHUNK:
+                vad_chunk = vad_buffer[:VAD_CHUNK]
+                vad_buffer = vad_buffer[VAD_CHUNK:]
+                
+                # Convert to tensor for VAD
+                audio_float32 = vad_chunk.astype(np.float32) / 32768.0
+                audio_tensor = torch.from_numpy(audio_float32)
+                
+                # Check for speech
+                try:
+                    speech_prob = vad_model(audio_tensor, RATE).item()
+                    
+                    if speech_prob < 0.5:  # No speech detected
+                        silence_chunks += 1
+                    else:
+                        silence_chunks = 0  # Reset silence counter
+                except Exception:
+                    # If VAD fails, just continue recording
+                    pass
+            
+            # Stop if we've had enough silence after minimum recording time
+            if i >= min_chunks and silence_chunks >= silence_threshold:
+                print(f"🛑 Speech ended (recorded {len(frames) * CHUNK / RATE:.1f}s)")
+                break
+    else:
+        # Fallback to fixed duration
+        RECORD_SECONDS = 4
+        for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+            data = temp_stream.read(CHUNK)
+            frames.append(data)
     
     temp_stream.stop_stream()
     temp_stream.close()
