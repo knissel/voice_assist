@@ -261,6 +261,85 @@ See [PIPER_TTS_SETUP.md](docs/PIPER_TTS_SETUP.md) for more voice options
 3. Add the function to `TOOL_FUNCTIONS` mapping
 4. The dispatcher will automatically handle calls
 
+## Profiling & Debugging
+
+### CPU Profiling with py-spy
+```bash
+# Install
+pip install py-spy
+
+# Profile running assistant (requires sudo on Linux)
+sudo py-spy top --pid $(pgrep -f wakeword.py)
+
+# Generate flame graph
+sudo py-spy record -o profile.svg --pid $(pgrep -f wakeword.py)
+```
+
+### Memory Profiling
+```bash
+pip install memory_profiler
+python -m memory_profiler wakeword.py
+```
+
+### cProfile for Function-Level Analysis
+```bash
+python -m cProfile -s cumtime wakeword.py 2>&1 | head -50
+```
+
+### Audio Debugging
+```bash
+# List audio devices
+python -c "import pyaudio; p = pyaudio.PyAudio(); [print(i, p.get_device_info_by_index(i)['name']) for i in range(p.get_device_count())]"
+
+# Test recording (Linux)
+arecord -d 5 -f S16_LE -r 16000 test.wav
+aplay test.wav
+
+# Test recording (macOS)
+rec -r 16000 -c 1 test.wav trim 0 5
+play test.wav
+```
+
+### Latency Measurement
+The assistant logs timing for each stage. Look for:
+- `🎧 Transcribing...` → ASR latency
+- `🧠 Processing...` → LLM latency  
+- `💬` → TTS start
+
+## Deployment as systemd Service
+
+### Install Service (Raspberry Pi)
+
+1. Copy the service file:
+```bash
+sudo cp voice-assistant.service /etc/systemd/system/
+```
+
+2. Edit paths if needed:
+```bash
+sudo nano /etc/systemd/system/voice-assistant.service
+```
+
+3. Enable and start:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable voice-assistant
+sudo systemctl start voice-assistant
+```
+
+4. Check status:
+```bash
+sudo systemctl status voice-assistant
+journalctl -u voice-assistant -f  # Live logs
+```
+
+### Service Management
+```bash
+sudo systemctl stop voice-assistant     # Stop
+sudo systemctl restart voice-assistant  # Restart
+sudo systemctl disable voice-assistant  # Disable auto-start
+```
+
 ## Troubleshooting
 
 ### "No speech detected"

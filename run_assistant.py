@@ -23,6 +23,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# === Pi 5 Optimizations ===
+torch.set_num_threads(2)
+torch.set_grad_enabled(False)
+
 # === CONFIGURATION ===
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -47,15 +51,39 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # Initialize transcription service with GPU offloading and fallback
 transcription_service = create_transcription_service()
 
-# Initialize Silero VAD
-try:
-    vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', force_reload=False, onnx=False)
-    (get_speech_timestamps, _, read_audio, _, _) = utils
-    vad_available = True
-    print("✅ VAD initialized successfully")
-except Exception as e:
-    print(f"⚠️  VAD initialization failed: {e}. Using fixed recording duration.")
-    vad_available = False
+# Initialize Silero VAD with local caching
+def load_vad_model():
+    """Load VAD model from local cache or download once."""
+    model_dir = os.path.join(REPO_ROOT, "models")
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, "silero_vad.jit")
+    
+    if os.path.exists(model_path):
+        try:
+            model = torch.jit.load(model_path)
+            print("✅ VAD loaded from local cache")
+            return model, True
+        except Exception as e:
+            print(f"⚠️  Failed to load cached VAD: {e}")
+    
+    try:
+        model, utils = torch.hub.load(
+            repo_or_dir='snakers4/silero-vad', 
+            model='silero_vad', 
+            force_reload=False, 
+            onnx=False
+        )
+        try:
+            torch.jit.save(model, model_path)
+            print(f"✅ VAD cached to {model_path}")
+        except Exception:
+            pass
+        return model, True
+    except Exception as e:
+        print(f"⚠️  VAD initialization failed: {e}. Using fixed recording duration.")
+        return None, False
+
+vad_model, vad_available = load_vad_model()
 
 # Initialize Piper TTS
 DEFAULT_PIPER_MODEL = os.path.join(REPO_ROOT, "piper_models", "en_US-lessac-medium.onnx")
@@ -63,6 +91,12 @@ PIPER_MODEL = os.getenv("PIPER_MODEL", DEFAULT_PIPER_MODEL)
 piper_voice = None
 if os.path.exists(PIPER_MODEL):
     piper_voice = PiperVoice.load(PIPER_MODEL)
+    if piper_voice:
+        try:
+            _ = list(piper_voice.synthesize("Ready"))
+            print("✅ Piper TTS pre-warmed")
+        except Exception:
+            pass
 else:
     print(f"⚠️  Piper model not found at {PIPER_MODEL}. TTS will not work until model is downloaded.")
 

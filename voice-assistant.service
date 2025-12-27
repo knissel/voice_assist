@@ -1,0 +1,42 @@
+[Unit]
+Description=Voice Assistant with Wake Word Detection
+After=network.target sound.target pulseaudio.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/voice_assist
+Environment=PATH=/home/pi/voice_assist/.venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/home/pi
+
+# Main executable
+ExecStart=/home/pi/voice_assist/.venv/bin/python wakeword.py
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=voice-assistant
+
+# Resource limits for Pi 5
+CPUQuota=80%
+MemoryMax=768M
+MemoryHigh=512M
+
+# Security hardening (optional, may need adjustment)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp /home/pi/voice_assist/logs
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
