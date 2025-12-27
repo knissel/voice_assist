@@ -4,6 +4,7 @@ import pvporcupine
 import wave
 import subprocess
 import os
+import shutil
 from google import genai
 from google.genai import types
 from google.cloud import texttospeech
@@ -148,7 +149,20 @@ def speak_tts(text):
         with open(audio_path, "wb") as out:
             out.write(response.audio_content)
         
-        subprocess.run(["mpg123", "-q", audio_path], check=False)
+        play_audio(audio_path)
+
+def play_audio(audio_path: str) -> None:
+    """Play an audio file using the first available system player."""
+    players = [
+        ("mpg123", ["mpg123", "-q", audio_path]),
+        ("afplay", ["afplay", audio_path]),
+        ("ffplay", ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", audio_path]),
+    ]
+    for player, cmd in players:
+        if shutil.which(player):
+            subprocess.run(cmd, check=False)
+            return
+    print("⚠️  No audio player found. Install mpg123 or ffmpeg for MP3 playback.")
 
 # 1. Setup the Engine
 # 'keywords' can be standard ones like ['jarvis', 'computer']

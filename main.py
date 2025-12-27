@@ -13,7 +13,7 @@ home_tool = types.Tool(
     function_declarations=[
         types.FunctionDeclaration(
             name="control_home_lighting",
-            description="Turns lights on/off or sets brightness. Use device_id 105 for Kitchen.",
+            description="Turns lights on/off or sets brightness. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89. For all lights use device_id=999 with brightness=100 (on) or 0 (off).",
             parameters=types.Schema(
                 type="OBJECT",
                 properties={

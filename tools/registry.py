@@ -16,12 +16,12 @@ GEMINI_TOOLS = [
         function_declarations=[
             types.FunctionDeclaration(
                 name="control_home_lighting",
-                description="Controls home lights. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89",
+                description="Controls home lights. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89. For all lights use device_id=999 with brightness=100 (on) or 0 (off).",
                 parameters=types.Schema(
                     type="OBJECT",
                     properties={
-                        "device_id": types.Schema(type="INTEGER", description="The device ID of the light to control"),
-                        "brightness": types.Schema(type="INTEGER", description="Brightness level 0-100")
+                        "device_id": types.Schema(type="INTEGER", description="The device ID of the light to control (use 999 for all lights)"),
+                        "brightness": types.Schema(type="INTEGER", description="Brightness level 0-100 (for all lights: 100 on, 0 off)")
                     },
                     required=["device_id", "brightness"]
                 )
@@ -113,17 +113,17 @@ TOOL_SPECS = [
         "type": "function",
         "function": {
             "name": "control_home_lighting",
-            "description": "Controls home lights. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89",
+            "description": "Controls home lights. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89. For all lights use device_id=999 with brightness=100 (on) or 0 (off).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "device_id": {
                         "type": "integer",
-                        "description": "The device ID of the light to control"
+                        "description": "The device ID of the light to control (use 999 for all lights)"
                     },
                     "brightness": {
                         "type": "integer",
-                        "description": "Brightness level 0-100"
+                        "description": "Brightness level 0-100 (for all lights: 100 on, 0 off)"
                     }
                 },
                 "required": ["device_id", "brightness"]
