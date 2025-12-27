@@ -10,10 +10,10 @@ import wave
 import subprocess
 import json
 import os
-import pyttsx3
 from typing import Optional
 from google import genai
 from google.genai import types
+from google.cloud import texttospeech
 from tools.registry import GEMINI_TOOLS, dispatch_tool
 from dotenv import load_dotenv
 
@@ -49,14 +49,17 @@ def _parse_mic_device_index(value: Optional[str]) -> Optional[int]:
         return None
 
 # === INITIALIZE ===
-tts_engine = pyttsx3.init()
-voices = tts_engine.getProperty('voices')
-for voice in voices:
-    if 'daniel' in voice.name.lower() or 'alex' in voice.name.lower():
-        tts_engine.setProperty('voice', voice.id)
-        break
-tts_engine.setProperty('rate', 165)
-tts_engine.setProperty('volume', 0.95)
+tts_client = texttospeech.TextToSpeechClient()
+tts_voice = texttospeech.VoiceSelectionParams(
+    language_code="en-US",
+    name="en-US-Neural2-J",
+    ssml_gender=texttospeech.SsmlVoiceGender.MALE
+)
+tts_audio_config = texttospeech.AudioConfig(
+    audio_encoding=texttospeech.AudioEncoding.MP3,
+    speaking_rate=1.1,
+    pitch=0.0
+)
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -143,11 +146,21 @@ def llm_respond_or_tool_call(user_text):
     return ""
 
 def speak(text):
-    """Speak text using TTS."""
+    """Speak text using Google Cloud TTS."""
     if text:
         print(f"💬 {text}")
-        tts_engine.say(text)
-        tts_engine.runAndWait()
+        synthesis_input = texttospeech.SynthesisInput(text=text)
+        response = tts_client.synthesize_speech(
+            input=synthesis_input,
+            voice=tts_voice,
+            audio_config=tts_audio_config
+        )
+        
+        audio_path = "/tmp/tts_output.mp3"
+        with open(audio_path, "wb") as out:
+            out.write(response.audio_content)
+        
+        subprocess.run(["mpg123", "-q", audio_path], check=False)
 
 # === MAIN LOOP ===
 def on_press(key):

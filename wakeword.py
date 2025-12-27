@@ -1,54 +1,33 @@
 import pyaudio
 import struct
 import pvporcupine
-import io
 import wave
-import json
 import subprocess
 import os
-import pyttsx3
 from google import genai
 from google.genai import types
-from tools.control4_tool import control_home_lighting
+from google.cloud import texttospeech
+from tools.registry import GEMINI_TOOLS, dispatch_tool
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Initialize text-to-speech engine
-tts_engine = pyttsx3.init()
-
-# Get available voices and select a better one
-voices = tts_engine.getProperty('voices')
-# Try to use a more natural voice (Alex, Samantha, or Daniel on macOS)
-for voice in voices:
-    if 'daniel' in voice.name.lower() or 'alex' in voice.name.lower():
-        tts_engine.setProperty('voice', voice.id)
-        break
-
-tts_engine.setProperty('rate', 165)  # Slightly slower for clarity
-tts_engine.setProperty('volume', 0.95)  # Volume (0.0 to 1.0)
+# Initialize Google Cloud TTS
+tts_client = texttospeech.TextToSpeechClient()
+tts_voice = texttospeech.VoiceSelectionParams(
+    language_code="en-US",
+    name="en-US-Neural2-J",
+    ssml_gender=texttospeech.SsmlVoiceGender.MALE
+)
+tts_audio_config = texttospeech.AudioConfig(
+    audio_encoding=texttospeech.AudioEncoding.MP3,
+    speaking_rate=1.1,
+    pitch=0.0
+)
 
 # Initialize Gemini client
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=GEMINI_API_KEY)
-
-# Define the tool for Gemini
-home_tool = types.Tool(
-    function_declarations=[
-        types.FunctionDeclaration(
-            name="control_home_lighting",
-            description="Controls home lights. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89. For ALL lights use device_id=999: brightness=0 for All OFF, brightness=100 for All ON",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={
-                    "device_id": types.Schema(type="INTEGER", description="The device ID of the light to control. Use 999 for all lights"),
-                    "brightness": types.Schema(type="INTEGER", description="Brightness level 0-100")
-                },
-                required=["device_id", "brightness"]
-            )
-        )
-    ]
-)
 
 def capture_and_process():
     # 1. Feedback to user (Optional: Play a local 'ding' file here)
@@ -128,7 +107,7 @@ def capture_and_process():
             model=model_name,
             contents=user_command,
             config=types.GenerateContentConfig(
-                tools=[home_tool],
+                tools=GEMINI_TOOLS,
                 system_instruction=system_instruction,
                 temperature=0.1
             )
@@ -142,25 +121,34 @@ def capture_and_process():
                     has_tool_call = True
                     print(f"✅ Action: {part.function_call.name}")
                     args = dict(part.function_call.args)
-                    result = control_home_lighting(
-                        args["device_id"], 
-                        args["brightness"]
-                    )
-                    print(f"📡 Result: {result}")
+                    result = dispatch_tool(part.function_call.name, args)
             
             if has_tool_call:
-                tts_engine.say("Done")
-                tts_engine.runAndWait()
+                speak_tts("Done")
             elif response.text:
                 print(f"💬 Jarvis: {response.text}")
-                tts_engine.say(response.text)
-                tts_engine.runAndWait()
+                speak_tts(response.text)
     
     except Exception as e:
         print(f"❌ Gemini API failed: {e}")
         error_msg = "I'm having trouble connecting to my brain."
-        tts_engine.say(error_msg)
-        tts_engine.runAndWait()
+        speak_tts(error_msg)
+
+def speak_tts(text):
+    """Speak text using Google Cloud TTS."""
+    if text:
+        synthesis_input = texttospeech.SynthesisInput(text=text)
+        response = tts_client.synthesize_speech(
+            input=synthesis_input,
+            voice=tts_voice,
+            audio_config=tts_audio_config
+        )
+        
+        audio_path = "/tmp/tts_output.mp3"
+        with open(audio_path, "wb") as out:
+            out.write(response.audio_content)
+        
+        subprocess.run(["mpg123", "-q", audio_path], check=False)
 
 # 1. Setup the Engine
 # 'keywords' can be standard ones like ['jarvis', 'computer']
