@@ -12,3 +12,4 @@ sounddevice
 numpy<2.0.0
 torch
 silero-vad
+flask

@@ -1,0 +1,6 @@
+# Requirements for RTX 5090 GPU server
+# Install these on your 5090 machine
+
+faster-whisper>=1.0.0
+flask>=3.0.0
+torch>=2.0.0

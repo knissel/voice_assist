@@ -18,23 +18,13 @@ from google import genai
 from google.genai import types
 from piper.voice import PiperVoice
 from tools.registry import GEMINI_TOOLS, dispatch_tool
+from tools.transcription import create_transcription_service
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # === CONFIGURATION ===
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_WHISPER_PATH = os.path.join(REPO_ROOT, "whisper.cpp", "build", "bin", "whisper-cli")
-DEFAULT_MODEL_PATH = os.path.join(REPO_ROOT, "whisper.cpp", "models", "ggml-tiny.bin")
-
-def _resolve_path(env_value: Optional[str], default_path: str) -> str:
-    """Prefer env path when it exists; otherwise fall back to repo default."""
-    if env_value and os.path.exists(env_value):
-        return env_value
-    return default_path
-
-WHISPER_PATH = _resolve_path(os.getenv("WHISPER_PATH"), DEFAULT_WHISPER_PATH)
-MODEL_PATH = _resolve_path(os.getenv("MODEL_PATH"), DEFAULT_MODEL_PATH)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 MODEL_NAME = os.getenv("MODEL_NAME", "gemini-flash-lite-latest")
 RECORD_SECONDS = 4
@@ -53,6 +43,9 @@ def _parse_mic_device_index(value: Optional[str]) -> Optional[int]:
 
 # === INITIALIZE ===
 client = genai.Client(api_key=GEMINI_API_KEY)
+
+# Initialize transcription service with GPU offloading and fallback
+transcription_service = create_transcription_service()
 
 # Initialize Silero VAD
 try:
@@ -174,26 +167,9 @@ def record_audio():
     return temp_path
 
 def transcribe(audio_path):
-    """Transcribe audio using Whisper.cpp."""
+    """Transcribe audio using GPU offloading with local fallback."""
     print("🎧 Transcribing...")
-    try:
-        result = subprocess.run(
-            [WHISPER_PATH, "-m", MODEL_PATH, "-f", audio_path, "-nt"],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        text = result.stdout.strip()
-        if text:
-            lines = text.split('\n')
-            text = next((line.strip() for line in reversed(lines) if line.strip() and not line.startswith('[')), "")
-        return text
-    except subprocess.TimeoutExpired:
-        print("⚠️  Transcription timed out")
-        return ""
-    except Exception as e:
-        print(f"⚠️  Transcription error: {e}")
-        return ""
+    return transcription_service.transcribe(audio_path)
 
 def llm_respond_or_tool_call(user_text):
     """Send to LLM, handle tool calls or text response."""

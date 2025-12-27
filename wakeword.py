@@ -12,9 +12,13 @@ from google import genai
 from google.genai import types
 from piper.voice import PiperVoice
 from tools.registry import GEMINI_TOOLS, dispatch_tool
+from tools.transcription import create_transcription_service
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Initialize transcription service with GPU offloading and fallback
+transcription_service = create_transcription_service()
 
 # Initialize Gemini client
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -120,33 +124,9 @@ def capture_and_process():
         wf.setframerate(RATE)
         wf.writeframes(b''.join(frames))
     
-    # 4. Transcribe with Whisper.cpp
-    print("🎧 Transcribing with Whisper...")
-    repo_root = os.path.dirname(os.path.abspath(__file__))
-    default_whisper_path = os.path.join(repo_root, "whisper.cpp", "build", "bin", "whisper-cli")
-    default_model_path = os.path.join(repo_root, "whisper.cpp", "models", "ggml-tiny.bin")
-
-    def resolve_path(env_value: str | None, default_path: str) -> str:
-        if env_value and os.path.exists(env_value):
-            return env_value
-        return default_path
-
-    whisper_path = resolve_path(os.getenv("WHISPER_PATH"), default_whisper_path)
-    model_path = resolve_path(os.getenv("MODEL_PATH"), default_model_path)
-    
-    result = subprocess.run(
-        [whisper_path, "-m", model_path, "-f", temp_audio_path, "-nt"],
-        capture_output=True,
-        text=True
-    )
-    
-    # Extract transcribed text from output
-    user_command = result.stdout.strip()
-    if user_command:
-        # Clean up the output - whisper sometimes adds timestamps
-        lines = user_command.split('\n')
-        # Get the last non-empty line which is usually the transcription
-        user_command = next((line.strip() for line in reversed(lines) if line.strip() and not line.startswith('[')), "")
+    # 4. Transcribe with GPU offloading (fallback to local if unavailable)
+    print("🎧 Transcribing...")
+    user_command = transcription_service.transcribe(temp_audio_path)
     
     if not user_command:
         print("❌ No speech detected")
