@@ -16,9 +16,18 @@ from google.genai import types
 from piper.voice import PiperVoice
 from tools.registry import GEMINI_TOOLS, dispatch_tool
 from tools.transcription import create_transcription_service
+from core.event_bus import (
+    EventBus, emit_state_changed, emit_transcript, 
+    emit_assistant_text, emit_tool_call, emit_tool_result, emit_error
+)
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# === Global Event Bus ===
+# UI clients can subscribe to receive real-time updates
+event_bus = EventBus()
+event_bus.start()
 
 # === Pi 5 Optimizations ===
 # Limit torch threads to reduce CPU contention on Pi
@@ -91,13 +100,14 @@ else:
 # This allows wakeword detection to continue while processing commands
 
 class AssistantWorker:
-    """Background worker that processes commands without blocking wakeword detection."""
+    """Background worker thread for processing voice commands."""
     
-    def __init__(self):
+    def __init__(self, bus: EventBus):
         self.command_queue = queue.Queue()
         self.is_processing = False
         self._running = False
         self._thread = None
+        self.bus = bus
     
     def start(self):
         """Start the worker thread."""
@@ -143,17 +153,28 @@ class AssistantWorker:
     
     def _process_command(self, audio_path: str):
         """Process a single command (transcribe -> LLM -> TTS)."""
+        # Start a new conversation turn
+        self.bus.new_correlation_id()
+        
         # 1. Transcribe
+        emit_state_changed(self.bus, "listening", "transcribing")
         print("🎧 Transcribing...")
+        
+        start_time = time.time()
         user_command = transcription_service.transcribe(audio_path)
+        transcribe_ms = int((time.time() - start_time) * 1000)
         
         if not user_command:
             print("❌ No speech detected")
+            emit_error(self.bus, "NO_SPEECH", "No speech detected in audio")
+            emit_state_changed(self.bus, "transcribing", "idle")
             return
         
         print(f"📝 You said: {user_command}")
+        emit_transcript(self.bus, user_command, is_final=True, duration_ms=transcribe_ms)
         
         # 2. Send to Gemini
+        emit_state_changed(self.bus, "transcribing", "thinking")
         print("🧠 Consulting Gemini...")
         
         try:
@@ -214,22 +235,39 @@ For all other questions, answer concisely in 1-2 sentences max."""
                 for part in response.candidates[0].content.parts:
                     if part.function_call:
                         has_tool_call = True
-                        print(f"✅ Action: {part.function_call.name}")
+                        tool_name = part.function_call.name
                         args = dict(part.function_call.args)
-                        result = dispatch_tool(part.function_call.name, args)
+                        
+                        print(f"✅ Action: {tool_name}")
+                        emit_tool_call(self.bus, tool_name, args)
+                        emit_state_changed(self.bus, "thinking", "executing")
+                        
+                        tool_start = time.time()
+                        result = dispatch_tool(tool_name, args)
+                        tool_ms = int((time.time() - tool_start) * 1000)
+                        
+                        emit_tool_result(self.bus, tool_name, success=True, result=str(result), duration_ms=tool_ms)
                 
                 if has_tool_call:
+                    emit_state_changed(self.bus, "executing", "speaking")
                     speak_tts("Done")
+                    emit_state_changed(self.bus, "speaking", "idle")
                 elif response.text:
                     print(f"💬 Jarvis: {response.text}")
+                    emit_assistant_text(self.bus, response.text)
+                    emit_state_changed(self.bus, "thinking", "speaking")
                     speak_tts(response.text)
+                    emit_state_changed(self.bus, "speaking", "idle")
         
         except Exception as e:
             print(f"❌ Gemini API failed: {e}")
+            emit_error(self.bus, "LLM_ERROR", str(e), recoverable=True)
+            emit_state_changed(self.bus, "thinking", "speaking")
             speak_tts("I'm having trouble connecting to my brain.")
+            emit_state_changed(self.bus, "speaking", "idle")
 
 # Global worker instance
-assistant_worker = AssistantWorker()
+assistant_worker = AssistantWorker(event_bus)
 
 def capture_audio_only():
     """
@@ -396,6 +434,8 @@ try:
                 continue
             
             print("🔔 Wake word detected!")
+            event_bus.emit("wakeword_detected", {"keyword_index": keyword_index})
+            emit_state_changed(event_bus, "idle", "listening")
             
             # Capture audio (blocking, but fast ~1-10s)
             # Then submit to worker for async processing
@@ -406,6 +446,7 @@ try:
 
 except KeyboardInterrupt:
     print("\n👋 Shutting down...")
+    event_bus.stop()
     assistant_worker.stop()
     if porcupine is not None:
         porcupine.delete()
