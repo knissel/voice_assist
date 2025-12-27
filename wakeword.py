@@ -7,24 +7,10 @@ import os
 import shutil
 from google import genai
 from google.genai import types
-from google.cloud import texttospeech
 from tools.registry import GEMINI_TOOLS, dispatch_tool
 from dotenv import load_dotenv
 
 load_dotenv()
-
-# Initialize Google Cloud TTS
-tts_client = texttospeech.TextToSpeechClient()
-tts_voice = texttospeech.VoiceSelectionParams(
-    language_code="en-US",
-    name="en-US-Neural2-J",
-    ssml_gender=texttospeech.SsmlVoiceGender.MALE
-)
-tts_audio_config = texttospeech.AudioConfig(
-    audio_encoding=texttospeech.AudioEncoding.MP3,
-    speaking_rate=1.1,
-    pitch=0.0
-)
 
 # Initialize Gemini client
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -136,33 +122,46 @@ def capture_and_process():
         speak_tts(error_msg)
 
 def speak_tts(text):
-    """Speak text using Google Cloud TTS."""
+    """Speak text using Gemini 2.5 Flash TTS."""
     if text:
-        synthesis_input = texttospeech.SynthesisInput(text=text)
-        response = tts_client.synthesize_speech(
-            input=synthesis_input,
-            voice=tts_voice,
-            audio_config=tts_audio_config
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-preview-tts",
+            contents=text,
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name="Kore"
+                        )
+                    )
+                )
+            )
         )
         
-        audio_path = "/tmp/tts_output.mp3"
-        with open(audio_path, "wb") as out:
-            out.write(response.audio_content)
+        audio_data = response.candidates[0].content.parts[0].inline_data.data
+        audio_path = "/tmp/tts_output.wav"
+        
+        with wave.open(audio_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(24000)
+            wf.writeframes(audio_data)
         
         play_audio(audio_path)
 
 def play_audio(audio_path: str) -> None:
     """Play an audio file using the first available system player."""
     players = [
-        ("mpg123", ["mpg123", "-q", audio_path]),
         ("afplay", ["afplay", audio_path]),
         ("ffplay", ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", audio_path]),
+        ("aplay", ["aplay", "-q", audio_path]),
     ]
     for player, cmd in players:
         if shutil.which(player):
             subprocess.run(cmd, check=False)
             return
-    print("⚠️  No audio player found. Install mpg123 or ffmpeg for MP3 playback.")
+    print("⚠️  No audio player found. Install ffmpeg or use a system with audio support.")
 
 # 1. Setup the Engine
 # 'keywords' can be standard ones like ['jarvis', 'computer']

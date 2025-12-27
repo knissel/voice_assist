@@ -1,5 +1,4 @@
 google-genai
-google-cloud-texttospeech
 pyaudio
 pvporcupine
 pynput

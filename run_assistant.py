@@ -13,7 +13,6 @@ import os
 from typing import Optional
 from google import genai
 from google.genai import types
-from google.cloud import texttospeech
 from tools.registry import GEMINI_TOOLS, dispatch_tool
 from dotenv import load_dotenv
 
@@ -49,18 +48,6 @@ def _parse_mic_device_index(value: Optional[str]) -> Optional[int]:
         return None
 
 # === INITIALIZE ===
-tts_client = texttospeech.TextToSpeechClient()
-tts_voice = texttospeech.VoiceSelectionParams(
-    language_code="en-US",
-    name="en-US-Neural2-J",
-    ssml_gender=texttospeech.SsmlVoiceGender.MALE
-)
-tts_audio_config = texttospeech.AudioConfig(
-    audio_encoding=texttospeech.AudioEncoding.MP3,
-    speaking_rate=1.1,
-    pitch=0.0
-)
-
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # === PIPELINE FUNCTIONS ===
@@ -158,19 +145,32 @@ def llm_respond_or_tool_call(user_text):
     return ""
 
 def speak(text):
-    """Speak text using Google Cloud TTS."""
+    """Speak text using Gemini 2.5 Flash TTS."""
     if text:
         print(f"💬 {text}")
-        synthesis_input = texttospeech.SynthesisInput(text=text)
-        response = tts_client.synthesize_speech(
-            input=synthesis_input,
-            voice=tts_voice,
-            audio_config=tts_audio_config
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-preview-tts",
+            contents=text,
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name="Kore"
+                        )
+                    )
+                )
+            )
         )
         
-        audio_path = "/tmp/tts_output.mp3"
-        with open(audio_path, "wb") as out:
-            out.write(response.audio_content)
+        audio_data = response.candidates[0].content.parts[0].inline_data.data
+        audio_path = "/tmp/tts_output.wav"
+        
+        with wave.open(audio_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(24000)
+            wf.writeframes(audio_data)
         
         subprocess.run(["afplay", audio_path], check=False)
 
