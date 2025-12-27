@@ -142,8 +142,14 @@ def create_transcription_service() -> TranscriptionService:
     default_whisper_path = os.path.join(repo_root, "whisper.cpp", "build", "bin", "whisper-cli")
     default_model_path = os.path.join(repo_root, "whisper.cpp", "models", "ggml-tiny.bin")
     
-    local_whisper_path = os.getenv("WHISPER_PATH", default_whisper_path)
-    local_model_path = os.getenv("MODEL_PATH", default_model_path)
+    def _resolve_path(env_value: Optional[str], fallback: str) -> str:
+        """Prefer env path when it exists; otherwise use fallback."""
+        if env_value and os.path.exists(env_value):
+            return env_value
+        return fallback
+
+    local_whisper_path = _resolve_path(os.getenv("WHISPER_PATH"), default_whisper_path)
+    local_model_path = _resolve_path(os.getenv("MODEL_PATH"), default_model_path)
     
     return TranscriptionService(
         remote_url=remote_url,

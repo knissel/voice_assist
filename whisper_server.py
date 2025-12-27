@@ -7,7 +7,8 @@ Usage:
     python whisper_server.py --model large-v3 --port 5000
 """
 import argparse
-import io
+import os
+import tempfile
 import time
 from flask import Flask, request, jsonify
 from faster_whisper import WhisperModel
@@ -18,11 +19,12 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 model = None
+MODEL_NAME = None
 
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint."""
-    return jsonify({"status": "healthy", "model": args.model}), 200
+    return jsonify({"status": "healthy", "model": MODEL_NAME}), 200
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
@@ -36,11 +38,13 @@ def transcribe():
     
     audio_file = request.files['audio']
     
+    temp_path = None
     try:
         start_time = time.time()
         
-        # Save to temporary location
-        temp_path = "/tmp/whisper_temp.wav"
+        # Save to a unique temp file to avoid collisions under concurrency
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            temp_path = tmp.name
         audio_file.save(temp_path)
         
         # Transcribe (optimized for speed)
@@ -73,6 +77,12 @@ def transcribe():
     except Exception as e:
         logger.error(f"Transcription error: {e}")
         return jsonify({"error": str(e)}), 500
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Whisper GPU inference server")
@@ -82,6 +92,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cuda", help="Device (cuda/cpu)")
     parser.add_argument("--compute-type", default="float16", help="Compute type")
     args = parser.parse_args()
+    MODEL_NAME = args.model
     
     logger.info(f"Loading Whisper model: {args.model} on {args.device}")
     model = WhisperModel(
