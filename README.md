@@ -8,7 +8,7 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
 - 🗣️ **Speech-to-Text**: Local transcription with Whisper.cpp
 - 🤖 **AI Processing**: Google Gemini 2.0 Flash Lite for natural language understanding
 - 🔧 **Function Calling**: Control smart home lights, Bluetooth devices, audio routing, and YouTube Music
-- 🔊 **Text-to-Speech**: High-quality neural voices using Google Cloud TTS
+- 🔊 **Text-to-Speech**: Ultra-low latency local TTS using Piper (~100-200ms)
 - ⌨️ **Push-to-Talk Mode**: Alternative mode using spacebar to activate
 - 🎵 **YouTube Music**: Play songs, albums, artists, and playlists
 - 🔉 **Volume Control**: Adjust system volume with voice commands
@@ -19,9 +19,8 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
 - macOS or Linux (Raspberry Pi supported)
 - [Whisper.cpp](https://github.com/ggerganov/whisper.cpp) installed locally
 - Google Gemini API key
-- Google Cloud TTS credentials (for high-quality voice)
 - Porcupine access key (for wake word detection)
-- mpg123 audio player (for TTS playback)
+- Piper TTS voice model (for local text-to-speech)
 
 ## Installation
 
@@ -39,11 +38,9 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
 
 3. **Install system dependencies**
    ```bash
-   # macOS
-   brew install mpg123
-   
    # Linux/Raspberry Pi
-   sudo apt-get install mpg123
+   sudo apt-get update
+   sudo apt-get install libportaudio2
    ```
 
 4. **Install Python dependencies**
@@ -63,17 +60,16 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
    cd ..
    ```
 
-6. **Set up Google Cloud TTS**
+6. **Set up Piper TTS**
    
-   1. Go to [Google Cloud Console](https://console.cloud.google.com)
-   2. Create a new project or select existing
-   3. Enable "Cloud Text-to-Speech API"
-   4. Create a service account:
-      - Go to IAM & Admin → Service Accounts
-      - Click "Create Service Account"
-      - Grant "Cloud Text-to-Speech User" role
-      - Create and download JSON key
-   5. Save the JSON key file to your project directory
+   Download a voice model (see [PIPER_TTS_SETUP.md](docs/PIPER_TTS_SETUP.md) for details):
+   ```bash
+   mkdir -p piper_models
+   cd piper_models
+   wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx
+   wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
+   cd ..
+   ```
 
 7. **Configure environment variables**
    
@@ -95,8 +91,8 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
    WHISPER_PATH=/path/to/whisper.cpp/build/bin/whisper-cli
    MODEL_PATH=/path/to/whisper.cpp/models/ggml-tiny.bin
    
-   # Google Cloud TTS Configuration
-   GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/service-account-key.json
+   # Piper TTS Configuration (optional, uses default if not set)
+   # PIPER_MODEL=/path/to/your/piper/model.onnx
    
    # Control4 Configuration (if using Control4 smart home)
    CONTROL4_USERNAME=your_username
@@ -118,11 +114,11 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
 3. Create an access key
 4. Copy the key to your `.env` file
 
-### Google Cloud TTS Credentials
-1. Follow the setup instructions in step 6 of Installation
-2. Download the service account JSON key
-3. Update `GOOGLE_APPLICATION_CREDENTIALS` in `.env` with the path to your JSON key file
-4. Free tier includes 1 million characters per month
+### Piper TTS Voice Models
+1. See [PIPER_TTS_SETUP.md](docs/PIPER_TTS_SETUP.md) for detailed setup
+2. Download voice models from [Piper Voices](https://huggingface.co/rhasspy/piper-voices)
+3. Recommended: `en_US-lessac-medium` for Raspberry Pi
+4. Completely free and runs locally (no API costs)
 
 ## Usage
 
@@ -139,7 +135,7 @@ Say the wake word, then speak your command. The assistant will:
 2. Record your voice command (4 seconds)
 3. Transcribe it using Whisper.cpp
 4. Process with Gemini Flash Lite
-5. Execute actions or respond verbally with high-quality TTS
+5. Execute actions or respond verbally with ultra-fast local TTS
 
 **Recommended for Raspberry Pi** - hands-free operation without keyboard
 
@@ -201,6 +197,7 @@ voice_assist/
 ├── main.py               # Basic example script
 ├── docs/                 # Documentation
 │   ├── RASPBERRY_PI_SETUP.md
+│   ├── PIPER_TTS_SETUP.md
 │   ├── YOUTUBE_MUSIC_SETUP.md
 │   ├── STOP_AUDIO_USAGE.md
 │   └── VOLUME_CONTROL_USAGE.md
@@ -241,23 +238,21 @@ Or use a custom wake word:
 keywords=['/path/to/custom_wakeword.ppn']
 ```
 
-### Adjust Voice Settings
+### Change Voice Model
 
-Edit the Google Cloud TTS settings in `run_assistant.py` or `wakeword.py`:
-```python
-tts_voice = texttospeech.VoiceSelectionParams(
-    language_code="en-US",
-    name="en-US-Neural2-J",  # Change voice (A-J available)
-    ssml_gender=texttospeech.SsmlVoiceGender.MALE
-)
-tts_audio_config = texttospeech.AudioConfig(
-    audio_encoding=texttospeech.AudioEncoding.MP3,
-    speaking_rate=1.1,  # Adjust speed (0.25 to 4.0)
-    pitch=0.0           # Adjust pitch (-20.0 to 20.0)
-)
+Download a different Piper voice model and update your `.env`:
+```bash
+PIPER_MODEL=/path/to/different/model.onnx
 ```
 
-Available voices: See [Google Cloud TTS Voices](https://cloud.google.com/text-to-speech/docs/voices)
+Available voices: Browse [Piper Voices](https://huggingface.co/rhasspy/piper-voices/tree/main)
+
+Popular options:
+- `en_US-lessac-medium` - Clear, neutral (recommended)
+- `en_US-amy-medium` - British English female
+- `en_US-ryan-medium` - American English male
+
+See [PIPER_TTS_SETUP.md](docs/PIPER_TTS_SETUP.md) for more voice options
 
 ### Add New Tools
 
@@ -299,7 +294,7 @@ MIT License - feel free to use this project for personal or commercial purposes.
 ## Acknowledgments
 
 - [Google Gemini](https://ai.google.dev/) for the LLM
-- [Google Cloud TTS](https://cloud.google.com/text-to-speech) for high-quality text-to-speech
+- [Piper](https://github.com/rhasspy/piper) for ultra-fast local text-to-speech
 - [Whisper.cpp](https://github.com/ggerganov/whisper.cpp) for speech recognition
 - [Porcupine](https://picovoice.ai/platform/porcupine/) for wake word detection
 - [pyControl4](https://github.com/lawtancool/pyControl4) for Control4 integration

@@ -7,3 +7,6 @@ python-dotenv
 ytmusicapi
 yt-dlp
 pyControl4
+piper-tts
+sounddevice
+numpy

@@ -50,3 +50,6 @@ Thumbs.db
 whisper.cpp/build/
 whisper.cpp/models/*.bin
 gen-lang-client-0388656676-831ece806e29.json
+
+# Piper TTS models (too large for git)
+piper_models/

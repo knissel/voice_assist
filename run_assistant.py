@@ -10,9 +10,12 @@ import wave
 import subprocess
 import json
 import os
+import numpy as np
+import sounddevice as sd
 from typing import Optional
 from google import genai
 from google.genai import types
+from piper.voice import PiperVoice
 from tools.registry import GEMINI_TOOLS, dispatch_tool
 from dotenv import load_dotenv
 
@@ -49,6 +52,15 @@ def _parse_mic_device_index(value: Optional[str]) -> Optional[int]:
 
 # === INITIALIZE ===
 client = genai.Client(api_key=GEMINI_API_KEY)
+
+# Initialize Piper TTS
+DEFAULT_PIPER_MODEL = os.path.join(REPO_ROOT, "piper_models", "en_US-lessac-medium.onnx")
+PIPER_MODEL = os.getenv("PIPER_MODEL", DEFAULT_PIPER_MODEL)
+piper_voice = None
+if os.path.exists(PIPER_MODEL):
+    piper_voice = PiperVoice.load(PIPER_MODEL)
+else:
+    print(f"⚠️  Piper model not found at {PIPER_MODEL}. TTS will not work until model is downloaded.")
 
 # === PIPELINE FUNCTIONS ===
 def record_audio():
@@ -145,35 +157,24 @@ def llm_respond_or_tool_call(user_text):
     return ""
 
 def speak(text):
-    """Speak text using Gemini 2.5 Flash TTS with direct playback."""
-    if text:
+    """Speak text using Piper TTS with direct audio playback."""
+    if text and piper_voice:
         print(f"💬 {text}")
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-preview-tts",
-            contents=text,
-            config=types.GenerateContentConfig(
-                response_modalities=["AUDIO"],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name="Kore"
-                        )
-                    )
-                )
-            )
+        stream = sd.OutputStream(
+            samplerate=piper_voice.config.sample_rate,
+            channels=1,
+            dtype='int16'
         )
+        stream.start()
         
-        audio_data = response.candidates[0].content.parts[0].inline_data.data
+        for audio_chunk in piper_voice.synthesize(text):
+            int_data = np.frombuffer(audio_chunk.audio_int16_bytes, dtype=np.int16)
+            stream.write(int_data)
         
-        p = pyaudio.PyAudio()
-        stream = p.open(format=pyaudio.paInt16,
-                       channels=1,
-                       rate=24000,
-                       output=True)
-        stream.write(audio_data)
-        stream.stop_stream()
+        stream.stop()
         stream.close()
-        p.terminate()
+    elif text and not piper_voice:
+        print(f"⚠️  Cannot speak: '{text}' - Piper model not loaded")
 
 # === MAIN LOOP ===
 def on_press(key):
