@@ -37,11 +37,11 @@ home_tool = types.Tool(
     function_declarations=[
         types.FunctionDeclaration(
             name="control_home_lighting",
-            description="Controls home lights. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89",
+            description="Controls home lights. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89. For ALL lights use device_id=999: brightness=0 for All OFF, brightness=100 for All ON",
             parameters=types.Schema(
                 type="OBJECT",
                 properties={
-                    "device_id": types.Schema(type="INTEGER", description="The device ID of the light to control"),
+                    "device_id": types.Schema(type="INTEGER", description="The device ID of the light to control. Use 999 for all lights"),
                     "brightness": types.Schema(type="INTEGER", description="Brightness level 0-100")
                 },
                 required=["device_id", "brightness"]
@@ -198,7 +198,8 @@ try:
         # 4. Wake Word Detected!
         if keyword_index >= 0:
             print("Wake word detected! (Robot)")
-            capture_and_process()  # Now using local LM Studio!
+            capture_and_process()
+            print("👂 Listening for wake word again...")
             # --- ACTION TAKEN HERE ---
             # 1. Pause any music playing
             # 2. Play a 'ding' sound (feedback)

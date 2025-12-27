@@ -29,15 +29,34 @@ class Control4Manager:
         light = C4Light(self.director, device_id)
         await light.setLevel(level)
         return f"Successfully set light {device_id} to {level}%"
+    
+    async def activate_scene(self, scene_id):
+        if not self.director: await self.connect()
+        await self.director.sendPostRequest(
+            "/api/v1/items/4/commands",
+            "ACTIVATE_SCENE",
+            {"SCENE_ID": scene_id}
+        )
+        scene_names = {0: "Sunrise", 1: "Sunset", 2: "All ON", 3: "All OFF"}
+        return f"Activated scene: {scene_names.get(scene_id, scene_id)}"
 
 # The actual function Gemini will "see"
 def control_home_lighting(device_id: int, brightness: int):
     """
     Adjusts home lights. 
-    Kitchen is ID 105, Living Room is 202, All Lights is 0.
+    Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89.
+    For ALL lights: use device_id=999 with brightness=100 for All ON or brightness=0 for All OFF.
     """
     username = os.getenv("CONTROL4_USERNAME")
     password = os.getenv("CONTROL4_PASSWORD")
     controller_ip = os.getenv("CONTROL4_CONTROLLER_IP", "192.168.20.12")
     manager = Control4Manager(username, password, controller_ip)
+    
+    # Special handling for "all lights" using scene activation
+    if device_id == 999:
+        if brightness == 0:
+            return asyncio.run(manager.activate_scene(3))  # All OFF scene
+        else:
+            return asyncio.run(manager.activate_scene(2))  # All ON scene
+    
     return asyncio.run(manager.set_light(device_id, brightness))
