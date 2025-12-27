@@ -9,6 +9,7 @@ from tools.control4_tool import control_home_lighting
 from tools.bluetooth import connect_bluetooth_device, disconnect_bluetooth_device, get_bluetooth_status
 from tools.audio import route_to_bluetooth, set_audio_sink, get_audio_sinks, control_volume
 from tools.youtube_music import play_youtube_music, stop_music
+from tools.timer import set_timer, cancel_timer, list_timers, check_timer
 
 # Tool specifications in Gemini format
 GEMINI_TOOLS = [
@@ -101,6 +102,49 @@ GEMINI_TOOLS = [
                         "level": types.Schema(type="INTEGER", description="For 'set': target volume 0-100. For 'up'/'down': amount to adjust (default 10)")
                     },
                     required=["action"]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="set_timer",
+                description="Set a timer for a specified duration. Use for cooking, reminders, etc.",
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "duration_minutes": types.Schema(type="INTEGER", description="Duration in minutes"),
+                        "name": types.Schema(type="STRING", description="Optional name for the timer (e.g., 'pasta', 'eggs', 'laundry')")
+                    },
+                    required=["duration_minutes"]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="cancel_timer",
+                description="Cancel an active timer. If no name provided, cancels the most recent timer.",
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "name": types.Schema(type="STRING", description="Name of timer to cancel (optional)")
+                    },
+                    required=[]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="check_timer",
+                description="Check how much time is left on a timer.",
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "name": types.Schema(type="STRING", description="Name of timer to check (optional, defaults to most recent)")
+                    },
+                    required=[]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="list_timers",
+                description="List all active timers with their remaining time.",
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={},
+                    required=[]
                 )
             )
         ]
@@ -263,7 +307,11 @@ TOOL_FUNCTIONS = {
     "set_audio_sink": set_audio_sink,
     "play_youtube_music": play_youtube_music,
     "stop_music": stop_music,
-    "control_volume": control_volume
+    "control_volume": control_volume,
+    "set_timer": set_timer,
+    "cancel_timer": cancel_timer,
+    "check_timer": check_timer,
+    "list_timers": list_timers
 }
 
 def dispatch_tool(name: str, args: dict) -> str:

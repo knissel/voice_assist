@@ -186,10 +186,11 @@ class AssistantWorker:
                                 'right now', 'latest', 'recent', 'who won', 'what time']
             needs_search = any(kw in user_command.lower() for kw in realtime_keywords)
             
-            # Detect if this is a smart home command
+            # Detect if this is a smart home/tool command
             home_keywords = ['light', 'lights', 'lamp', 'brightness', 'dim', 'bright', 'turn on',
                            'turn off', 'kitchen', 'family room', 'foyer', 'stairs', 'island',
-                           'bluetooth', 'connect', 'disconnect', 'volume', 'music', 'play', 'stop']
+                           'bluetooth', 'connect', 'disconnect', 'volume', 'music', 'play', 'stop',
+                           'timer', 'alarm', 'remind', 'minutes', 'seconds', 'hours', 'cancel timer']
             needs_tools = any(kw in user_command.lower() for kw in home_keywords)
             
             # Location context
