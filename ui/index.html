@@ -360,8 +360,34 @@
             border-color: var(--accent-blue);
         }
 
+        .action-icon,
+        .inline-icon,
+        .timer-icon,
+        .no-timers-icon {
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-primary);
+        }
+
         .action-icon {
-            font-size: 28px;
+            margin-bottom: 6px;
+        }
+
+        .inline-icon {
+            margin-right: 8px;
+        }
+
+        .action-icon svg,
+        .inline-icon svg,
+        .timer-icon svg,
+        .no-timers-icon svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+            stroke: currentColor;
         }
 
         .action-label {
@@ -620,7 +646,13 @@
                 <h2 class="panel-title">Timers</h2>
                 <div class="timers-list" id="timersList">
                     <div class="no-timers">
-                        <div class="no-timers-icon">⏱️</div>
+                        <div class="no-timers-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                                <circle cx="12" cy="13" r="8" fill="none" stroke-width="2"></circle>
+                                <path d="M12 13V9" stroke-width="2" stroke-linecap="round"></path>
+                                <path d="M9 2h6" stroke-width="2" stroke-linecap="round"></path>
+                            </svg>
+                        </div>
                         <div>No active timers</div>
                         <div style="font-size: 12px;">Say "Set a timer for 5 minutes"</div>
                     </div>
@@ -631,19 +663,39 @@
         <!-- Quick Actions -->
         <nav class="quick-actions">
             <button class="action-btn" onclick="toggleLights(true)">
-                <span class="action-icon">💡</span>
+                <span class="action-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M9 21h6" stroke-width="2" stroke-linecap="round"></path>
+                        <path d="M10 17h4" stroke-width="2" stroke-linecap="round"></path>
+                        <path d="M12 3a6 6 0 0 0-3.5 10.9c.7.5 1.2 1.3 1.4 2.1h4.2c.2-.8.7-1.6 1.4-2.1A6 6 0 0 0 12 3z" fill="none" stroke-width="2"></path>
+                    </svg>
+                </span>
                 <span class="action-label">Lights On</span>
             </button>
             <button class="action-btn" onclick="toggleLights(false)">
-                <span class="action-icon">🌙</span>
+                <span class="action-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5z" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                    </svg>
+                </span>
                 <span class="action-label">Lights Off</span>
             </button>
             <button class="action-btn" onclick="openTimerModal()">
-                <span class="action-icon">⏱️</span>
+                <span class="action-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <circle cx="12" cy="13" r="8" fill="none" stroke-width="2"></circle>
+                        <path d="M12 13V9" stroke-width="2" stroke-linecap="round"></path>
+                        <path d="M9 2h6" stroke-width="2" stroke-linecap="round"></path>
+                    </svg>
+                </span>
                 <span class="action-label">Set Timer</span>
             </button>
             <button class="action-btn" onclick="stopMusic()">
-                <span class="action-icon">⏹️</span>
+                <span class="action-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <rect x="7" y="7" width="10" height="10" fill="currentColor"></rect>
+                    </svg>
+                </span>
                 <span class="action-label">Stop Audio</span>
             </button>
         </nav>
@@ -748,10 +800,14 @@
                     addMessage('assistant', event.data.text);
                     break;
                 case 'tool_call':
-                    addMessage('tool', `🔧 ${event.data.tool_name}: ${JSON.stringify(event.data.arguments)}`);
+                    if (event.data.origin !== 'ui') {
+                        addToolMessage(event.data.tool_name, event.data.arguments);
+                    }
                     break;
                 case 'tool_result':
-                    // Don't show tool results in chat, they're usually just confirmations
+                    if (!event.data.success) {
+                        addToolMessage(event.data.tool_name, null, event.data.result, true);
+                    }
                     break;
                 case 'timer_started':
                     addTimer(event.data);
@@ -798,14 +854,18 @@
         }
 
         // Messages
-        function addMessage(type, text) {
+        function addMessage(type, text, options = {}) {
             const list = document.getElementById('conversationList');
             const msg = document.createElement('div');
             msg.className = `message ${type}`;
             
             const textEl = document.createElement('div');
             textEl.className = 'message-text';
-            textEl.textContent = text;
+            if (options.html) {
+                textEl.innerHTML = text;
+            } else {
+                textEl.textContent = text;
+            }
             msg.appendChild(textEl);
 
             const timeEl = document.createElement('div');
@@ -820,6 +880,55 @@
             while (list.children.length > 20) {
                 list.removeChild(list.firstChild);
             }
+        }
+
+        function iconSvg(name) {
+            const icons = {
+                tool: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 7l3 3m-7 7l-3 3m2-14l2 2-6 6-2-2 6-6zm8-1a4 4 0 0 1-5 5l-8 8-3-3 8-8a4 4 0 0 1 5-5z" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
+                light: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21h6" stroke-width="2" stroke-linecap="round"></path><path d="M10 17h4" stroke-width="2" stroke-linecap="round"></path><path d="M12 3a6 6 0 0 0-3.5 10.9c.7.5 1.2 1.3 1.4 2.1h4.2c.2-.8.7-1.6 1.4-2.1A6 6 0 0 0 12 3z" fill="none" stroke-width="2"></path></svg>',
+                timer: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8" fill="none" stroke-width="2"></circle><path d="M12 13V9" stroke-width="2" stroke-linecap="round"></path><path d="M9 2h6" stroke-width="2" stroke-linecap="round"></path></svg>',
+                music: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18a2 2 0 1 1-2-2 2 2 0 0 1 2 2zm8-11v9a2 2 0 1 1-2-2 2 2 0 0 1 2 2v-7l-8 2v5a2 2 0 1 1-2-2 2 2 0 0 1 2 2V6l10-3z" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
+                check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
+            };
+            return icons[name] || icons.tool;
+        }
+
+        function formatToolCall(toolName, args, resultText, isError) {
+            let text = '';
+            let icon = iconSvg('tool');
+            
+            if (toolName === 'control_home_lighting' && args) {
+                icon = iconSvg('light');
+                if (args.device_id === 999) {
+                    text = args.brightness === 0 ? 'All lights off' : 'All lights on';
+                } else {
+                    text = `Light ${args.device_id} → ${args.brightness}%`;
+                }
+            } else if (toolName === 'set_timer' && args) {
+                icon = iconSvg('timer');
+                const name = args.name ? ` (${args.name})` : '';
+                text = `Timer set for ${args.duration_minutes} min${name}`;
+            } else if (toolName === 'stop_music') {
+                icon = iconSvg('music');
+                text = 'Stopped audio';
+            } else {
+                text = toolName;
+            }
+
+            if (resultText) {
+                text = `${text} — ${resultText}`;
+            }
+
+            if (isError) {
+                text = `⚠️ ${text}`;
+            }
+
+            return `<span class="inline-icon">${icon}</span>${text}`;
+        }
+
+        function addToolMessage(toolName, args, resultText = null, isError = false) {
+            const html = formatToolCall(toolName, args, resultText, isError);
+            addMessage('tool', html, { html: true });
         }
 
         // Timers
@@ -860,11 +969,18 @@
         function renderTimers() {
             const list = document.getElementById('timersList');
             const timerIds = Object.keys(timers);
+            const emptyIcon = `
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="13" r="8" fill="none" stroke-width="2"></circle>
+                    <path d="M12 13V9" stroke-width="2" stroke-linecap="round"></path>
+                    <path d="M9 2h6" stroke-width="2" stroke-linecap="round"></path>
+                </svg>
+            `;
 
             if (timerIds.length === 0) {
                 list.innerHTML = `
                     <div class="no-timers">
-                        <div class="no-timers-icon">⏱️</div>
+                        <div class="no-timers-icon">${emptyIcon}</div>
                         <div>No active timers</div>
                         <div style="font-size: 12px;">Say "Set a timer for 5 minutes"</div>
                     </div>
@@ -882,7 +998,7 @@
 
                 return `
                     <div class="timer-card ${isUrgent ? 'urgent' : ''} ${isComplete ? 'complete' : ''}">
-                        <div class="timer-icon">${isComplete ? '✅' : '⏱️'}</div>
+                        <div class="timer-icon">${isComplete ? iconSvg('check') : iconSvg('timer')}</div>
                         <div class="timer-info">
                             <div class="timer-name">${timer.name}</div>
                             <div class="timer-remaining">${isComplete ? 'Done!' : formatTime(remaining)}</div>

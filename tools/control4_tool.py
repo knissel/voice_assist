@@ -67,15 +67,29 @@ class Control4Manager:
 _control4_manager = None
 _control4_lock = threading.Lock()
 _event_loop = None
+_loop_thread = None
 _loop_lock = threading.Lock()
+_loop_ready = threading.Event()
+
+
+def _loop_runner():
+    """Run the Control4 event loop in a dedicated thread."""
+    global _event_loop
+    loop = asyncio.new_event_loop()
+    _event_loop = loop
+    _loop_ready.set()
+    loop.run_forever()
 
 
 def _get_event_loop():
-    """Get or create a dedicated event loop for Control4 operations."""
-    global _event_loop
+    """Get or start a dedicated event loop for Control4 operations."""
+    global _loop_thread
     with _loop_lock:
         if _event_loop is None or _event_loop.is_closed():
-            _event_loop = asyncio.new_event_loop()
+            _loop_ready.clear()
+            _loop_thread = threading.Thread(target=_loop_runner, daemon=True, name="Control4Loop")
+            _loop_thread.start()
+            _loop_ready.wait(timeout=2.0)
         return _event_loop
 
 
@@ -94,6 +108,9 @@ def _get_manager():
 def _run_async(coro):
     """Run an async coroutine in the dedicated event loop."""
     loop = _get_event_loop()
+    if loop and loop.is_running():
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result(timeout=30)
     return loop.run_until_complete(coro)
 
 

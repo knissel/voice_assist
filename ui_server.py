@@ -44,7 +44,7 @@ class UIHTTPHandler(SimpleHTTPRequestHandler):
         pass
 
 
-async def websocket_handler(websocket, path):
+async def websocket_handler(websocket, path=None):
     """Handle WebSocket connections from UI clients."""
     clients.add(websocket)
     print(f"🖥️  UI client connected ({len(clients)} total)")
@@ -68,34 +68,26 @@ async def handle_client_message(data: dict, websocket):
     msg_type = data.get("type")
     
     if msg_type == "tool_call":
-        # Execute a tool directly
+        # Forward tool calls to the assistant (wakeword bridge) for execution
         tool_name = data.get("tool")
         args = data.get("args", {})
-        
-        try:
-            from tools.registry import dispatch_tool
-            result = dispatch_tool(tool_name, args)
-            
-            # Send result back
-            await websocket.send(json.dumps({
-                "type": "tool_result",
-                "data": {
-                    "tool_name": tool_name,
-                    "success": True,
-                    "result": str(result)
-                }
-            }))
-        except Exception as e:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "data": {
-                    "error_code": "TOOL_ERROR",
-                    "message": str(e)
-                }
-            }))
+
+        await broadcast_event({
+            "type": "tool_call",
+            "data": {
+                "tool_name": tool_name,
+                "arguments": args,
+                "origin": "ui"
+            }
+        })
     
     elif msg_type == "ping":
         await websocket.send(json.dumps({"type": "pong"}))
+    
+    elif msg_type == "event":
+        event_data = data.get("data")
+        if isinstance(event_data, dict):
+            await broadcast_event(event_data)
 
 
 async def broadcast_event(event_data: dict):

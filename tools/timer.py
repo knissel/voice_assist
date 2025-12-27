@@ -327,8 +327,10 @@ def _get_timer_manager() -> TimerManager:
         event_bus = None
         try:
             import sys
-            if 'wakeword' in sys.modules:
+            if 'wakeword' in sys.modules and hasattr(sys.modules['wakeword'], "event_bus"):
                 event_bus = sys.modules['wakeword'].event_bus
+            elif '__main__' in sys.modules and hasattr(sys.modules['__main__'], "event_bus"):
+                event_bus = sys.modules['__main__'].event_bus
         except:
             pass
         _timer_manager = TimerManager(event_bus)

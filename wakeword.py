@@ -1,3 +1,5 @@
+import asyncio
+import json
 import pyaudio
 import struct
 import pvporcupine
@@ -22,12 +24,115 @@ from core.event_bus import (
 )
 from dotenv import load_dotenv
 
+try:
+    import websockets
+except Exception:
+    websockets = None
+
 load_dotenv()
 
 # === Global Event Bus ===
 # UI clients can subscribe to receive real-time updates
 event_bus = EventBus()
 event_bus.start()
+
+# === UI Event Bridge ===
+# Sends EventBus updates to the UI server via WebSocket.
+UI_WS_URL = os.getenv("UI_WS_URL", "ws://localhost:8766")
+
+
+class UIEventBridge:
+    """Bridge EventBus events to the UI WebSocket server."""
+
+    def __init__(self, bus: EventBus, ws_url: str):
+        self.bus = bus
+        self.ws_url = ws_url
+        self._queue = queue.Queue(maxsize=500)
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        if not websockets:
+            print("⚠️  websockets not installed; UI event bridge disabled")
+            return
+        self._running = True
+        self.bus.subscribe("*", self._on_event)
+        self._thread = threading.Thread(target=self._run, daemon=True, name="UIEventBridge")
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
+
+    def _on_event(self, event):
+        if not self._running:
+            return
+        try:
+            self._queue.put_nowait(event.to_dict())
+        except queue.Full:
+            pass
+
+    def _run(self):
+        asyncio.run(self._async_loop())
+
+    async def _async_loop(self):
+        while self._running:
+            try:
+                async with websockets.connect(self.ws_url) as ws:
+                    sender = asyncio.create_task(self._send_loop(ws))
+                    receiver = asyncio.create_task(self._receive_loop(ws))
+                    done, pending = await asyncio.wait(
+                        [sender, receiver],
+                        return_when=asyncio.FIRST_EXCEPTION
+                    )
+                    for task in pending:
+                        task.cancel()
+            except Exception as e:
+                print(f"⚠️  UI bridge connection failed: {e}")
+                await asyncio.sleep(2)
+
+    async def _send_loop(self, ws):
+        while self._running:
+            loop = asyncio.get_running_loop()
+            event = await loop.run_in_executor(None, self._queue.get)
+            if event is None:
+                return
+            await ws.send(json.dumps({"type": "event", "data": event}))
+
+    async def _receive_loop(self, ws):
+        while self._running:
+            raw = await ws.recv()
+            try:
+                message = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+            if not isinstance(message, dict):
+                continue
+
+            if message.get("type") == "tool_call":
+                data = message.get("data", {})
+                if data.get("origin") != "ui":
+                    continue
+
+                tool_name = data.get("tool_name")
+                args = data.get("arguments", {})
+                if not tool_name:
+                    continue
+
+                emit_tool_call(event_bus, tool_name, args)
+                try:
+                    result = dispatch_tool(tool_name, args)
+                    emit_tool_result(event_bus, tool_name, True, result)
+                except Exception as e:
+                    emit_tool_result(event_bus, tool_name, False, str(e))
+
+
+ui_bridge = UIEventBridge(event_bus, UI_WS_URL)
+ui_bridge.start()
 
 # === Pi 5 Optimizations ===
 # Limit torch threads to reduce CPU contention on Pi
@@ -447,6 +552,7 @@ try:
 
 except KeyboardInterrupt:
     print("\n👋 Shutting down...")
+    ui_bridge.stop()
     event_bus.stop()
     assistant_worker.stop()
     if porcupine is not None:
