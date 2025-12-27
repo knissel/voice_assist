@@ -43,21 +43,25 @@ def transcribe():
         temp_path = "/tmp/whisper_temp.wav"
         audio_file.save(temp_path)
         
-        # Transcribe
+        # Transcribe (optimized for speed)
+        transcribe_start = time.time()
         segments, info = model.transcribe(
             temp_path,
-            beam_size=5,
+            beam_size=1,  # Faster, still accurate for short commands
             language="en",
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500)
+            vad_filter=False,  # Disable VAD for speed (client already does VAD)
+            temperature=0.0
         )
         
         # Combine segments
+        segment_start = time.time()
         text = " ".join([segment.text for segment in segments]).strip()
+        segment_time = time.time() - segment_start
         
         duration = time.time() - start_time
+        transcribe_time = time.time() - transcribe_start
         
-        logger.info(f"Transcribed in {duration:.2f}s: {text}")
+        logger.info(f"Transcribed in {duration:.2f}s (model: {transcribe_time:.2f}s, segments: {segment_time:.2f}s): {text}")
         
         return jsonify({
             "text": text,
