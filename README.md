@@ -4,20 +4,24 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
 
 ## Features
 
-- 🎤 **Wake Word Detection**: Uses Porcupine for "Jarvis" or custom wake words
+- 🎤 **Wake Word Detection**: Uses Porcupine for "americano", "computer", or custom wake words
 - 🗣️ **Speech-to-Text**: Local transcription with Whisper.cpp
-- 🤖 **AI Processing**: Google Gemini 2.0 Flash for natural language understanding
-- 🔧 **Function Calling**: Control smart home lights, Bluetooth devices, and audio routing
-- 🔊 **Text-to-Speech**: Natural voice responses using pyttsx3
+- 🤖 **AI Processing**: Google Gemini 2.0 Flash Lite for natural language understanding
+- 🔧 **Function Calling**: Control smart home lights, Bluetooth devices, audio routing, and YouTube Music
+- 🔊 **Text-to-Speech**: High-quality neural voices using Google Cloud TTS
 - ⌨️ **Push-to-Talk Mode**: Alternative mode using spacebar to activate
+- 🎵 **YouTube Music**: Play songs, albums, artists, and playlists
+- 🔉 **Volume Control**: Adjust system volume with voice commands
 
 ## Prerequisites
 
 - Python 3.9+
-- macOS (for audio features)
+- macOS or Linux (Raspberry Pi supported)
 - [Whisper.cpp](https://github.com/ggerganov/whisper.cpp) installed locally
 - Google Gemini API key
+- Google Cloud TTS credentials (for high-quality voice)
 - Porcupine access key (for wake word detection)
+- mpg123 audio player (for TTS playback)
 
 ## Installation
 
@@ -33,12 +37,21 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
    source .venv/bin/activate
    ```
 
-3. **Install dependencies**
+3. **Install system dependencies**
+   ```bash
+   # macOS
+   brew install mpg123
+   
+   # Linux/Raspberry Pi
+   sudo apt-get install mpg123
+   ```
+
+4. **Install Python dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Set up Whisper.cpp**
+5. **Set up Whisper.cpp**
    ```bash
    # Clone and build whisper.cpp
    git clone https://github.com/ggerganov/whisper.cpp.git
@@ -50,7 +63,19 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
    cd ..
    ```
 
-5. **Configure environment variables**
+6. **Set up Google Cloud TTS**
+   
+   1. Go to [Google Cloud Console](https://console.cloud.google.com)
+   2. Create a new project or select existing
+   3. Enable "Cloud Text-to-Speech API"
+   4. Create a service account:
+      - Go to IAM & Admin → Service Accounts
+      - Click "Create Service Account"
+      - Grant "Cloud Text-to-Speech User" role
+      - Create and download JSON key
+   5. Save the JSON key file to your project directory
+
+7. **Configure environment variables**
    
    Copy the example environment file:
    ```bash
@@ -61,6 +86,7 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
    ```bash
    # Gemini API Configuration
    GEMINI_API_KEY=your_gemini_api_key_here
+   MODEL_NAME=gemini-flash-lite-latest
    
    # Porcupine Wake Word Configuration
    PORCUPINE_ACCESS_KEY=your_porcupine_access_key_here
@@ -68,6 +94,14 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
    # Whisper Configuration (update paths if needed)
    WHISPER_PATH=/path/to/whisper.cpp/build/bin/whisper-cli
    MODEL_PATH=/path/to/whisper.cpp/models/ggml-tiny.bin
+   
+   # Google Cloud TTS Configuration
+   GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/service-account-key.json
+   
+   # Control4 Configuration (if using Control4 smart home)
+   CONTROL4_USERNAME=your_username
+   CONTROL4_PASSWORD=your_password
+   CONTROL4_CONTROLLER_IP=192.168.x.x
    ```
 
 ## Getting API Keys
@@ -84,11 +118,17 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
 3. Create an access key
 4. Copy the key to your `.env` file
 
+### Google Cloud TTS Credentials
+1. Follow the setup instructions in step 6 of Installation
+2. Download the service account JSON key
+3. Update `GOOGLE_APPLICATION_CREDENTIALS` in `.env` with the path to your JSON key file
+4. Free tier includes 1 million characters per month
+
 ## Usage
 
 ### Wake Word Mode (Continuous Listening)
 
-Run the wake word listener that responds to "Jarvis" or "Computer":
+Run the wake word listener that responds to "americano" or "computer":
 
 ```bash
 python wakeword.py
@@ -96,10 +136,12 @@ python wakeword.py
 
 Say the wake word, then speak your command. The assistant will:
 1. Detect the wake word
-2. Record your voice command
-3. Transcribe it using Whisper
-4. Process with Gemini Flash
-5. Execute actions or respond verbally
+2. Record your voice command (4 seconds)
+3. Transcribe it using Whisper.cpp
+4. Process with Gemini Flash Lite
+5. Execute actions or respond verbally with high-quality TTS
+
+**Recommended for Raspberry Pi** - hands-free operation without keyboard
 
 ### Push-to-Talk Mode
 
@@ -127,10 +169,20 @@ python run_assistant.py
 - Foyer: 87
 - Stairs: 89
 
-### Bluetooth Control
+### Bluetooth & Audio Control
 - "Connect to [device name]"
 - "Disconnect Bluetooth"
 - "Route audio to Bluetooth"
+- "Turn up the volume"
+- "Set volume to 50%"
+- "Turn down the volume"
+
+### YouTube Music
+- "Play [song name]"
+- "Play [artist name]"
+- "Play [album name]"
+- "Stop the music"
+- "Pause"
 
 ### General Questions
 Ask any question and Jarvis will respond with concise answers.
@@ -178,16 +230,34 @@ voice_assist/
 
 Edit `wakeword.py` line 161:
 ```python
-keywords=['jarvis', 'computer']  # Change to your preferred wake words
+keywords=['americano', 'computer']  # Change to your preferred wake words
+```
+
+Or use a custom wake word:
+1. Train a custom wake word at [Picovoice Console](https://console.picovoice.ai/)
+2. Download the `.ppn` file
+3. Update the keywords parameter:
+```python
+keywords=['/path/to/custom_wakeword.ppn']
 ```
 
 ### Adjust Voice Settings
 
-Edit the TTS settings in any script:
+Edit the Google Cloud TTS settings in `run_assistant.py` or `wakeword.py`:
 ```python
-tts_engine.setProperty('rate', 165)    # Speech rate
-tts_engine.setProperty('volume', 0.95) # Volume level
+tts_voice = texttospeech.VoiceSelectionParams(
+    language_code="en-US",
+    name="en-US-Neural2-J",  # Change voice (A-J available)
+    ssml_gender=texttospeech.SsmlVoiceGender.MALE
+)
+tts_audio_config = texttospeech.AudioConfig(
+    audio_encoding=texttospeech.AudioEncoding.MP3,
+    speaking_rate=1.1,  # Adjust speed (0.25 to 4.0)
+    pitch=0.0           # Adjust pitch (-20.0 to 20.0)
+)
 ```
+
+Available voices: See [Google Cloud TTS Voices](https://cloud.google.com/text-to-speech/docs/voices)
 
 ### Add New Tools
 
@@ -229,6 +299,7 @@ MIT License - feel free to use this project for personal or commercial purposes.
 ## Acknowledgments
 
 - [Google Gemini](https://ai.google.dev/) for the LLM
+- [Google Cloud TTS](https://cloud.google.com/text-to-speech) for high-quality text-to-speech
 - [Whisper.cpp](https://github.com/ggerganov/whisper.cpp) for speech recognition
 - [Porcupine](https://picovoice.ai/platform/porcupine/) for wake word detection
-- [pyttsx3](https://github.com/nateshmbhat/pyttsx3) for text-to-speech
+- [pyControl4](https://github.com/lawtancool/pyControl4) for Control4 integration
