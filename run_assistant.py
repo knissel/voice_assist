@@ -208,20 +208,55 @@ def transcribe(audio_path):
 def llm_respond_or_tool_call(user_text):
     """Send to LLM, handle tool calls or text response."""
     print(f"🧠 Processing: {user_text}")
-    lighting_keywords = ['light', 'lights', 'lamp', 'brightness', 'dim', 'bright', 'kitchen', 'family room', 'foyer', 'stairs', 'island']
-    is_lighting = any(kw in user_text.lower() for kw in lighting_keywords)
     
-    system_instruction = "You are Jarvis. For lighting commands, IMMEDIATELY call control_home_lighting function with NO explanation. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89. For non-lighting questions, answer in 1-2 sentences max."
+    # Detect if this needs real-time info (weather, stocks, news, sports, current events)
+    realtime_keywords = ['weather', 'temperature', 'forecast', 'stock', 'price', 'market',
+                        'news', 'score', 'game', 'playing', 'today', 'tonight', 'current',
+                        'right now', 'latest', 'recent', 'who won', 'what time']
+    needs_search = any(kw in user_text.lower() for kw in realtime_keywords)
     
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=user_text,
-        config=types.GenerateContentConfig(
-            tools=GEMINI_TOOLS,
-            system_instruction=system_instruction,
-            temperature=0.1
+    # Detect if this is a smart home command
+    home_keywords = ['light', 'lights', 'lamp', 'brightness', 'dim', 'bright', 'turn on',
+                   'turn off', 'kitchen', 'family room', 'foyer', 'stairs', 'island',
+                   'bluetooth', 'connect', 'disconnect', 'volume', 'music', 'play', 'stop']
+    needs_tools = any(kw in user_text.lower() for kw in home_keywords)
+    
+    # Location context
+    location_context = "User is located in Charlotte, NC (zip code 28211)."
+    
+    if needs_search and not needs_tools:
+        # Use Google Search for real-time info
+        system_instruction = f"You are Jarvis, a helpful voice assistant. {location_context} Answer concisely in 1-2 sentences."
+        google_search_tool = types.Tool(google_search=types.GoogleSearch())
+        
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=user_text,
+            config=types.GenerateContentConfig(
+                tools=[google_search_tool],
+                system_instruction=system_instruction,
+                temperature=0.3
+            )
         )
-    )
+    else:
+        # Use function calling for smart home and general questions
+        system_instruction = f"""You are Jarvis, a helpful voice assistant. {location_context}
+
+For lighting commands, IMMEDIATELY call control_home_lighting function with NO explanation.
+Device IDs: Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89.
+For ALL lights: use device_id=999 with brightness=100 (ON) or brightness=0 (OFF).
+
+For all other questions, answer concisely in 1-2 sentences max."""
+        
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=user_text,
+            config=types.GenerateContentConfig(
+                tools=GEMINI_TOOLS,
+                system_instruction=system_instruction,
+                temperature=0.3
+            )
+        )
     
     if response.candidates and response.candidates[0].content.parts:
         for part in response.candidates[0].content.parts:
