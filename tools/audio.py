@@ -167,3 +167,174 @@ def route_to_bluetooth(device_name: str = None):
             return f"Bluetooth routing failed: {str(e)}. Using default output."
     
     return "Bluetooth audio routing not supported on this platform. Using default output."
+
+def get_current_volume():
+    """
+    Get the current system volume level.
+    
+    Returns:
+        Volume level as integer (0-100) or error message
+    """
+    system = platform.system()
+    
+    if system == "Darwin":  # macOS
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", "output volume of (get volume settings)"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return int(result.stdout.strip())
+            return f"Failed to get volume: {result.stderr}"
+        except Exception as e:
+            return f"Error getting volume: {str(e)}"
+    
+    elif system == "Linux":
+        # Try wpctl first (PipeWire)
+        try:
+            result = subprocess.run(
+                ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                # Output format: "Volume: 0.50" -> convert to percentage
+                volume_str = result.stdout.strip().split()[-1]
+                volume = int(float(volume_str) * 100)
+                return volume
+        except FileNotFoundError:
+            pass
+        
+        # Fall back to pactl (PulseAudio)
+        try:
+            result = subprocess.run(
+                ["pactl", "get-sink-volume", "@DEFAULT_SINK@"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                # Parse output like: "Volume: front-left: 32768 /  50% / -18.06 dB"
+                for part in result.stdout.split():
+                    if '%' in part:
+                        return int(part.replace('%', ''))
+            return "Failed to parse volume"
+        except Exception as e:
+            return f"Error getting volume: {str(e)}"
+    
+    return "Unsupported platform for volume control"
+
+def set_volume(level: int):
+    """
+    Set the system volume to a specific level.
+    
+    Args:
+        level: Volume level (0-100)
+    
+    Returns:
+        Success or error message
+    """
+    # Clamp level to valid range
+    level = max(0, min(100, level))
+    
+    system = platform.system()
+    
+    if system == "Darwin":  # macOS
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", f"set volume output volume {level}"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return f"Volume set to {level}%"
+            return f"Failed to set volume: {result.stderr}"
+        except Exception as e:
+            return f"Error setting volume: {str(e)}"
+    
+    elif system == "Linux":
+        # Try wpctl first (PipeWire)
+        try:
+            # wpctl expects decimal (0.0-1.0)
+            volume_decimal = level / 100.0
+            result = subprocess.run(
+                ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", str(volume_decimal)],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return f"Volume set to {level}%"
+        except FileNotFoundError:
+            pass
+        
+        # Fall back to pactl (PulseAudio)
+        try:
+            result = subprocess.run(
+                ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{level}%"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return f"Volume set to {level}%"
+            return f"Failed to set volume: {result.stderr}"
+        except Exception as e:
+            return f"Error setting volume: {str(e)}"
+    
+    return "Unsupported platform for volume control"
+
+def adjust_volume(direction: str, amount: int = 10):
+    """
+    Adjust the system volume up or down by a specific amount.
+    
+    Args:
+        direction: "up" or "down"
+        amount: Amount to adjust by (default 10%)
+    
+    Returns:
+        Success or error message with new volume level
+    """
+    current = get_current_volume()
+    
+    if isinstance(current, str):
+        return current
+    
+    if direction.lower() == "up":
+        new_level = min(100, current + amount)
+    elif direction.lower() == "down":
+        new_level = max(0, current - amount)
+    else:
+        return f"Invalid direction: {direction}. Use 'up' or 'down'."
+    
+    result = set_volume(new_level)
+    return f"{result} (was {current}%)"
+
+def control_volume(action: str, level: int = None):
+    """
+    Control system volume with various actions.
+    
+    Args:
+        action: "up", "down", or "set"
+        level: Target level for "set" action (0-100), or adjustment amount for up/down (default 10)
+    
+    Returns:
+        Success or error message
+    """
+    action = action.lower()
+    
+    if action == "set":
+        if level is None:
+            return "Error: level required for 'set' action"
+        return set_volume(level)
+    
+    elif action in ["up", "down"]:
+        amount = level if level is not None else 10
+        return adjust_volume(action, amount)
+    
+    else:
+        return f"Invalid action: {action}. Use 'up', 'down', or 'set'."

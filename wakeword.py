@@ -9,7 +9,7 @@ import os
 import pyttsx3
 from google import genai
 from google.genai import types
-from control4_tool import control_home_lighting
+from tools.control4_tool import control_home_lighting
 from dotenv import load_dotenv
 
 load_dotenv()

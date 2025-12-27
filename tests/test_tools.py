@@ -4,7 +4,9 @@ Simple test app for Control4 lighting tools.
 No wake word or LLM required - just direct function calls.
 """
 import sys
-from control4_tool import control_home_lighting
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.control4_tool import control_home_lighting
 
 def print_menu():
     print("\n" + "="*50)

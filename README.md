@@ -144,14 +144,31 @@ voice_assist/
 ├── .gitignore             # Git ignore rules
 ├── requirements.txt       # Python dependencies
 ├── README.md             # This file
-├── run_assistant.py      # Push-to-talk mode
-├── wakeword.py           # Wake word detection mode
+├── run_assistant.py      # Push-to-talk mode (main entry point)
+├── wakeword.py           # Wake word detection mode (main entry point)
 ├── main.py               # Basic example script
-├── control4_tool.py      # Control4 smart home integration
-├── tools/
+├── docs/                 # Documentation
+│   ├── RASPBERRY_PI_SETUP.md
+│   ├── YOUTUBE_MUSIC_SETUP.md
+│   ├── STOP_AUDIO_USAGE.md
+│   └── VOLUME_CONTROL_USAGE.md
+├── tests/                # Test files
+│   ├── test_volume_control.py
+│   ├── test_stop_music.py
+│   ├── test_youtube_music.py
+│   └── ... (other test files)
+├── scripts/              # Utility scripts
+│   ├── setup_youtube_music.py
+│   ├── find_devices.py
+│   ├── find_scenes.py
+│   └── ... (other utility scripts)
+├── tools/                # Core tool modules
 │   ├── registry.py       # Tool definitions and dispatch
+│   ├── control4_tool.py  # Control4 smart home integration
+│   ├── lights.py         # Lighting control utilities
 │   ├── bluetooth.py      # Bluetooth device management
-│   └── audio.py          # Audio routing functions
+│   ├── audio.py          # Audio routing and volume control
+│   └── youtube_music.py  # YouTube Music integration
 └── whisper.cpp/          # Whisper.cpp installation (gitignored)
 ```
 

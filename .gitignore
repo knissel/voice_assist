@@ -1,5 +1,6 @@
 # Environment variables
 .env
+oauth.json
 
 # Python
 __pycache__/

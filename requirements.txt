@@ -5,3 +5,5 @@ pyttsx3
 pynput
 requests
 python-dotenv
+ytmusicapi
+yt-dlp

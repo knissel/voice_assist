@@ -5,9 +5,10 @@ Centralizes tool schemas and dispatch logic.
 import json
 from datetime import datetime
 from google.genai import types
-from control4_tool import control_home_lighting
+from tools.control4_tool import control_home_lighting
 from tools.bluetooth import connect_bluetooth_device, disconnect_bluetooth_device, get_bluetooth_status
-from tools.audio import route_to_bluetooth, set_audio_sink, get_audio_sinks
+from tools.audio import route_to_bluetooth, set_audio_sink, get_audio_sinks, control_volume
+from tools.youtube_music import play_youtube_music, stop_music
 
 # Tool specifications in Gemini format
 GEMINI_TOOLS = [
@@ -67,6 +68,39 @@ GEMINI_TOOLS = [
                         "sink_id": types.Schema(type="STRING", description="Audio sink identifier or device name")
                     },
                     required=["sink_id"]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="play_youtube_music",
+                description="Play music on YouTube Music. Search and play songs, albums, artists, playlists, or videos.",
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "query": types.Schema(type="STRING", description="What to play (song name, artist name, playlist name, etc.)"),
+                        "content_type": types.Schema(type="STRING", description="Type of content: 'song', 'video', 'album', 'artist', or 'playlist'. Defaults to 'song'.")
+                    },
+                    required=["query"]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="stop_music",
+                description="Stop all audio playback including music and text-to-speech. Use when user asks to stop, pause, turn off music, or silence TTS/speech.",
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={},
+                    required=[]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="control_volume",
+                description="Control system volume. Can turn volume up, down, or set to a specific percentage (0-100).",
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "action": types.Schema(type="STRING", description="Action to perform: 'up', 'down', or 'set'"),
+                        "level": types.Schema(type="INTEGER", description="For 'set': target volume 0-100. For 'up'/'down': amount to adjust (default 10)")
+                    },
+                    required=["action"]
                 )
             )
         ]
@@ -163,6 +197,60 @@ TOOL_SPECS = [
                 "required": ["sink_id"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "play_youtube_music",
+            "description": "Play music on YouTube Music. Search and play songs, albums, artists, playlists, or videos.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "What to play (song name, artist name, playlist name, etc.)"
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "description": "Type of content: 'song', 'video', 'album', 'artist', or 'playlist'. Defaults to 'song'."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_music",
+            "description": "Stop all audio playback including music and text-to-speech. Use when user asks to stop, pause, turn off music, or silence TTS/speech.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "control_volume",
+            "description": "Control system volume. Can turn volume up, down, or set to a specific percentage (0-100).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "Action to perform: 'up', 'down', or 'set'"
+                    },
+                    "level": {
+                        "type": "integer",
+                        "description": "For 'set': target volume 0-100. For 'up'/'down': amount to adjust (default 10)"
+                    }
+                },
+                "required": ["action"]
+            }
+        }
     }
 ]
 
@@ -172,7 +260,10 @@ TOOL_FUNCTIONS = {
     "connect_bluetooth_device": connect_bluetooth_device,
     "disconnect_bluetooth_device": disconnect_bluetooth_device,
     "route_to_bluetooth": route_to_bluetooth,
-    "set_audio_sink": set_audio_sink
+    "set_audio_sink": set_audio_sink,
+    "play_youtube_music": play_youtube_music,
+    "stop_music": stop_music,
+    "control_volume": control_volume
 }
 
 def dispatch_tool(name: str, args: dict) -> str:
