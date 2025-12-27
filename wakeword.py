@@ -102,7 +102,7 @@ def capture_and_process():
     try:
         system_instruction = "You are Jarvis. For lighting commands, IMMEDIATELY call control_home_lighting function with NO explanation. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89. For non-lighting questions, answer in 1-2 sentences max."
         
-        model_name = os.getenv("MODEL_NAME", "gemini-1.5-flash")
+        model_name = os.getenv("MODEL_NAME", "gemini-flash-lite-latest")
         response = client.models.generate_content(
             model=model_name,
             contents=user_command,

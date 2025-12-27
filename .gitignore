@@ -49,3 +49,4 @@ Thumbs.db
 # Whisper.cpp build artifacts (if included)
 whisper.cpp/build/
 whisper.cpp/models/*.bin
+gen-lang-client-0388656676-831ece806e29.json

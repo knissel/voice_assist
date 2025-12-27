@@ -109,12 +109,24 @@ def record_audio():
 def transcribe(audio_path):
     """Transcribe audio using Whisper.cpp."""
     print("🎧 Transcribing...")
-    result = subprocess.run([WHISPER_PATH, "-m", MODEL_PATH, "-f", audio_path, "-nt"], capture_output=True, text=True)
-    text = result.stdout.strip()
-    if text:
-        lines = text.split('\n')
-        text = next((line.strip() for line in reversed(lines) if line.strip() and not line.startswith('[')), "")
-    return text
+    try:
+        result = subprocess.run(
+            [WHISPER_PATH, "-m", MODEL_PATH, "-f", audio_path, "-nt"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        text = result.stdout.strip()
+        if text:
+            lines = text.split('\n')
+            text = next((line.strip() for line in reversed(lines) if line.strip() and not line.startswith('[')), "")
+        return text
+    except subprocess.TimeoutExpired:
+        print("⚠️  Transcription timed out")
+        return ""
+    except Exception as e:
+        print(f"⚠️  Transcription error: {e}")
+        return ""
 
 def llm_respond_or_tool_call(user_text):
     """Send to LLM, handle tool calls or text response."""
@@ -160,7 +172,7 @@ def speak(text):
         with open(audio_path, "wb") as out:
             out.write(response.audio_content)
         
-        subprocess.run(["mpg123", "-q", audio_path], check=False)
+        subprocess.run(["afplay", audio_path], check=False)
 
 # === MAIN LOOP ===
 def on_press(key):
