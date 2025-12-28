@@ -56,3 +56,6 @@ piper_models/
 
 # Cached models (generated locally)
 models/
+
+# Deployment config (user-specific)
+deploy.config

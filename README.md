@@ -306,6 +306,58 @@ The assistant logs timing for each stage. Look for:
 - `🧠 Processing...` → LLM latency  
 - `💬` → TTS start
 
+## Remote Deployment
+
+Deploy code changes to your Raspberry Pi without physical access.
+
+### Prerequisites
+
+1. **SSH key authentication** set up with your Pi:
+   ```bash
+   # Generate SSH key if you don't have one
+   ssh-keygen -t ed25519
+   
+   # Copy to Pi
+   ssh-copy-id pi@raspberrypi.local
+   ```
+
+2. **rsync** available on your dev machine:
+   - **Windows**: Install via WSL, Git Bash, or [cwRsync](https://itefix.net/cwrsync)
+   - **macOS/Linux**: Pre-installed
+
+3. **Configure deployment**:
+   ```bash
+   cp deploy.config.example deploy.config
+   # Edit deploy.config with your Pi's hostname/IP
+   ```
+
+### Deploy Commands
+
+**PowerShell (Windows):**
+```powershell
+.\deploy.ps1 --all              # Deploy everything and restart
+.\deploy.ps1 --ui               # Deploy UI only (no restart needed)
+.\deploy.ps1 --wakeword         # Deploy wakeword code and restart
+.\deploy.ps1 --wakeword --logs  # Deploy and tail logs
+.\deploy.ps1 --restart          # Just restart the service
+.\deploy.ps1 --dry-run --all    # Preview what would be deployed
+```
+
+**Bash (WSL/Git Bash/Linux/macOS):**
+```bash
+./deploy.sh --all              # Deploy everything and restart
+./deploy.sh --ui               # Deploy UI only
+./deploy.sh --wakeword --logs  # Deploy wakeword and show logs
+```
+
+### What Gets Deployed
+
+| Flag | Files | Restart |
+|------|-------|---------|
+| `--ui` | `ui/` | No |
+| `--wakeword` | `wakeword.py`, `core/`, `tools/`, `adapters/`, `schemas/` | Yes |
+| `--all` | Everything above + config files | Yes |
+
 ## Deployment as systemd Service
 
 ### Install Service (Raspberry Pi)

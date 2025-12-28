@@ -1,10 +1,20 @@
 # Requirements for RTX 5090 GPU server
 # Install these on your 5090 machine
+#
+# IMPORTANT: RTX 5090 (Blackwell/sm_120) requires PyTorch nightly with CUDA 12.8.
+# Install PyTorch FIRST before these requirements:
+#   py -m pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+#
+# For older GPUs (RTX 30xx/40xx), stable PyTorch works fine.
 
 faster-whisper>=1.0.0
 flask>=3.0.0
-torch>=2.0.0
-torchaudio>=2.0.0
+
+# XTTS v2 currently needs an older transformers API (BeamSearchScorer export)
+transformers==4.35.2
 
 # XTTS v2 TTS (high quality neural TTS)
 TTS>=0.22.0
+
+# Audio I/O - used instead of torchaudio.load/save to avoid torchcodec/FFmpeg issues on Windows
+soundfile>=0.12.0

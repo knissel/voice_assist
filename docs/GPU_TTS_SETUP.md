@@ -18,6 +18,35 @@ This guide explains how to set up high-quality XTTS v2 text-to-speech on your RT
 
 ### 1. Install Dependencies
 
+#### Windows with RTX 5090 (Blackwell Architecture)
+
+The RTX 5090 uses the new Blackwell architecture (sm_120) which requires **PyTorch nightly** with CUDA 12.8:
+
+```powershell
+# Install PyTorch nightly with CUDA 12.8 (required for RTX 5090)
+py -m pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# Install TTS and other dependencies
+py -m pip install flask TTS transformers==4.35.2 soundfile
+```
+
+> **Note**: The `transformers==4.35.2` pinning is required for XTTS v2 compatibility.
+> **Note**: `soundfile` is used for audio I/O to avoid FFmpeg dependency issues on Windows.
+
+#### Linux with RTX 5090
+
+```bash
+# Install PyTorch nightly with CUDA 12.8
+pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# Install TTS and dependencies
+pip install flask TTS transformers==4.35.2 soundfile
+```
+
+#### Older GPUs (RTX 30xx/40xx)
+
+For older NVIDIA GPUs, you can use the stable PyTorch release:
+
 ```bash
 # On your GPU machine
 cd voice_assist
@@ -122,7 +151,7 @@ The `GPUTTSClient` class accepts:
 | Component | Time |
 |-----------|------|
 | Network round-trip | 20-50ms |
-| XTTS inference (5090) | 150-250ms |
+| XTTS inference (5090) | 150-300ms |
 | Audio transfer | 20-50ms |
 | **Total GPU TTS** | **200-350ms** |
 | **Piper (local)** | **100-150ms** |
@@ -139,6 +168,11 @@ The `GPUTTSClient` class accepts:
 ### Server won't start
 - Ensure CUDA is available: `python -c "import torch; print(torch.cuda.is_available())"`
 - Check GPU memory: XTTS needs ~2GB VRAM
+- **RTX 5090**: If you see "sm_120 is not compatible", install PyTorch nightly with CUDA 12.8:
+  ```powershell
+  py -m pip install --pre --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+  ```
+- **Windows torchcodec errors**: Ensure `soundfile` is installed (`pip install soundfile`). The server uses soundfile for audio I/O to avoid FFmpeg dependencies.
 
 ### High latency
 - Check network: `ping <gpu-server-ip>`

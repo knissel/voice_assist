@@ -1,0 +1,16 @@
+# Voice Assistant Deployment Configuration
+# Copy this file to deploy.config and edit values for your Pi
+#
+# cp deploy.config.example deploy.config
+
+# Pi connection string (user@hostname or user@ip)
+# Examples:
+#   PI_HOST="pi@raspberrypi.local"    # mDNS hostname
+#   PI_HOST="pi@192.168.1.100"        # Static IP
+PI_HOST="pi@raspberrypi.local"
+
+# Path to voice_assist on the Pi
+PI_PATH="/home/pi/voice_assist"
+
+# Systemd service name
+SERVICE_NAME="voice-assistant"
