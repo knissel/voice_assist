@@ -17,7 +17,8 @@ class TranscriptionService:
         remote_url: Optional[str] = None,
         local_whisper_path: Optional[str] = None,
         local_model_path: Optional[str] = None,
-        timeout: float = 5.0
+        timeout: float = 5.0,
+        health_check_interval: float = 30.0
     ):
         """
         Initialize transcription service with fallback.
@@ -27,30 +28,43 @@ class TranscriptionService:
             local_whisper_path: Path to whisper.cpp binary
             local_model_path: Path to whisper.cpp model
             timeout: Timeout for remote server requests (seconds)
+            health_check_interval: How often to re-check server health (seconds)
         """
         self.remote_url = remote_url
         self.local_whisper_path = local_whisper_path
         self.local_model_path = local_model_path
         self.timeout = timeout
         self.remote_available = False
+        self._last_health_check = 0.0
+        self._health_check_interval = health_check_interval
         
         # Check remote server availability
         if self.remote_url:
             self._check_remote_health()
     
-    def _check_remote_health(self) -> bool:
-        """Check if remote server is available."""
+    def _check_remote_health(self, force: bool = False) -> bool:
+        """Check if remote server is available. Uses cached result if recent."""
+        import time
+        now = time.time()
+        
+        # Use cached result if recent (unless forced)
+        if not force and self._last_health_check > 0:
+            if (now - self._last_health_check) < self._health_check_interval:
+                return self.remote_available
+        
         try:
             response = requests.get(
                 f"{self.remote_url}/health",
                 timeout=self.timeout
             )
             self.remote_available = response.status_code == 200
+            self._last_health_check = now
             if self.remote_available:
                 logger.info(f"✅ Remote Whisper server available at {self.remote_url}")
             return self.remote_available
         except (requests.RequestException, Exception) as e:
             self.remote_available = False
+            self._last_health_check = now
             logger.debug(f"Remote server unavailable: {e}")
             return False
     
@@ -119,6 +133,10 @@ class TranscriptionService:
         Returns:
             Transcribed text (empty string if both methods fail)
         """
+        # Re-check health if cached result says unavailable (server may have recovered)
+        if not self.remote_available and self.remote_url:
+            self._check_remote_health()
+        
         # Try remote first if available
         if self.remote_available:
             text = self._transcribe_remote(audio_path)

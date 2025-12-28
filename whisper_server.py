@@ -54,7 +54,10 @@ def transcribe():
             beam_size=1,  # Faster, still accurate for short commands
             language="en",
             vad_filter=False,  # Disable VAD for speed (client already does VAD)
-            temperature=0.0
+            temperature=0.0,
+            word_timestamps=False,  # Skip word-level alignment (saves ~10-20%)
+            condition_on_previous_text=False,  # Better for single utterances
+            without_timestamps=True,  # Skip timestamp generation for speed
         )
         
         # Combine segments

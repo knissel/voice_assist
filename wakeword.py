@@ -347,7 +347,15 @@ class AssistantWorker:
         print("🎧 Transcribing...")
         
         start_time = time.time()
-        user_command = transcription_service.transcribe(audio_path)
+        try:
+            user_command = transcription_service.transcribe(audio_path)
+        finally:
+            # Clean up temp audio file to avoid /tmp accumulation
+            try:
+                if audio_path and os.path.exists(audio_path):
+                    os.remove(audio_path)
+            except OSError:
+                pass
         transcribe_ms = int((time.time() - start_time) * 1000)
         
         if not user_command:
@@ -486,7 +494,8 @@ def capture_audio_only():
     RATE = 16000
     MAX_RECORD_SECONDS = 15      # Extended max recording time
     GRACE_PERIOD_SECONDS = 1.5   # Wait this long before checking for silence
-    SILENCE_DURATION = 2.0       # Require 2s of silence to stop (was 1.5s)
+    SILENCE_DURATION = 1.5       # Require 1.5s of silence to stop (reduced from 2.0s for faster response)
+    VAD_NORMALIZE = 1.0 / 32768.0  # Pre-computed normalization factor
     
     frames = []
     temp_stream = pa.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
@@ -550,8 +559,8 @@ def capture_audio_only():
                 ring_read_pos = (ring_read_pos + VAD_CHUNK) % RING_SIZE
                 ring_available -= VAD_CHUNK
                 
-                # Convert to tensor in-place (reuse buffer)
-                vad_tensor_buffer[:] = torch.from_numpy(vad_chunk.astype(np.float32) / 32768.0)
+                # Convert to tensor in-place (reuse buffer, pre-computed normalization)
+                vad_tensor_buffer[:] = torch.from_numpy(vad_chunk.astype(np.float32) * VAD_NORMALIZE)
                 
                 try:
                     speech_prob = vad_model(vad_tensor_buffer, RATE).item()
@@ -611,8 +620,8 @@ def speak_tts(text):
     """
     Speak text using GPU TTS (XTTS) with Piper fallback.
     
-    Tries GPU server first for higher quality, falls back to local Piper
-    if server is unavailable or times out.
+    Tries GPU streaming first for lowest latency, falls back to non-streaming,
+    then to local Piper if server is unavailable.
     """
     # Preprocess text for more natural TTS
     text = preprocess_for_tts(text)
@@ -620,8 +629,12 @@ def speak_tts(text):
     if not text:
         return
     
-    # Try GPU TTS first if available
+    # Try GPU TTS streaming first (lowest latency - plays audio as it's generated)
     if gpu_tts_client and tts_audio_output:
+        if gpu_tts_client.synthesize_stream(text, tts_audio_output):
+            return
+        
+        # Fall back to non-streaming if streaming fails
         result = gpu_tts_client.synthesize(text, prefer_gpu=True)
         if result is not None:
             audio_data, sample_rate = result

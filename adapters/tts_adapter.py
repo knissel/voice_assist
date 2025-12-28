@@ -124,6 +124,10 @@ class TTSAdapter:
         if not self.use_sentence_splitting:
             return [text]
         
+        # Skip splitting for short text (overhead not worth it)
+        if len(text) < self.min_sentence_length:
+            return [text]
+        
         sentences = self.SENTENCE_PATTERN.split(text)
         
         # Merge very short sentences with the next one

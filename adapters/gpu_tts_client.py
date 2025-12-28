@@ -345,19 +345,30 @@ class GPUTTSClient:
             return False
     
     def _resample(self, audio: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
-        """Simple resampling using linear interpolation."""
+        """Resample audio using scipy for better quality and speed."""
         if from_rate == to_rate:
             return audio
         
-        # Calculate new length
-        duration = len(audio) / from_rate
-        new_length = int(duration * to_rate)
-        
-        # Linear interpolation
-        old_indices = np.linspace(0, len(audio) - 1, new_length)
-        new_audio = np.interp(old_indices, np.arange(len(audio)), audio.astype(np.float32))
-        
-        return new_audio.astype(np.int16)
+        try:
+            from scipy.signal import resample_poly
+            from math import gcd
+            
+            # Find the GCD to minimize resampling ratio
+            g = gcd(from_rate, to_rate)
+            up = to_rate // g
+            down = from_rate // g
+            
+            # resample_poly is faster and higher quality than linear interp
+            resampled = resample_poly(audio.astype(np.float32), up, down)
+            return np.clip(resampled, -32768, 32767).astype(np.int16)
+            
+        except ImportError:
+            # Fallback to linear interpolation if scipy not available
+            duration = len(audio) / from_rate
+            new_length = int(duration * to_rate)
+            old_indices = np.linspace(0, len(audio) - 1, new_length)
+            new_audio = np.interp(old_indices, np.arange(len(audio)), audio.astype(np.float32))
+            return new_audio.astype(np.int16)
     
     def get_stats(self) -> dict:
         """Get usage statistics."""

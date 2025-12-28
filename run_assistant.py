@@ -217,7 +217,8 @@ def record_audio():
         # VAD-based recording with optimized ring buffer
         MAX_RECORD_SECONDS = 15      # Extended max recording time
         GRACE_PERIOD_SECONDS = 1.5   # Wait this long before checking for silence
-        SILENCE_DURATION = 2.0       # Require 2s of silence to stop (was 1.5s)
+        SILENCE_DURATION = 1.5       # Require 1.5s of silence to stop (reduced for faster response)
+        VAD_NORMALIZE = 1.0 / 32768.0  # Pre-computed normalization factor
         VAD_CHUNK = 512  # Silero VAD requires exactly 512 samples for 16kHz
         
         silence_chunks = 0
@@ -277,8 +278,8 @@ def record_audio():
                 ring_read_pos = (ring_read_pos + VAD_CHUNK) % RING_SIZE
                 ring_available -= VAD_CHUNK
                 
-                # Convert to tensor in-place (reuse buffer)
-                vad_tensor_buffer[:] = torch.from_numpy(vad_chunk.astype(np.float32) / 32768.0)
+                # Convert to tensor in-place (reuse buffer, pre-computed normalization)
+                vad_tensor_buffer[:] = torch.from_numpy(vad_chunk.astype(np.float32) * VAD_NORMALIZE)
                 
                 # Check for speech
                 try:
