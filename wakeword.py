@@ -201,6 +201,68 @@ if os.path.exists(PIPER_MODEL):
 else:
     print(f"⚠️  Piper model not found at {PIPER_MODEL}. TTS will not work until model is downloaded.")
 
+
+# === Persistent Audio Output Stream (Pi5 Optimization) ===
+class PersistentAudioOutput:
+    """
+    Manages a persistent audio output stream to avoid per-utterance overhead.
+    Creating/destroying streams costs ~50-100ms each time on Pi.
+    """
+    
+    def __init__(self, sample_rate: int = 22050, channels: int = 1):
+        self.sample_rate = sample_rate
+        self.channels = channels
+        self._stream = None
+        self._lock = threading.Lock()
+    
+    def _ensure_stream(self):
+        """Create stream if not exists or if closed."""
+        if self._stream is None or not self._stream.active:
+            if self._stream is not None:
+                try:
+                    self._stream.close()
+                except Exception:
+                    pass
+            self._stream = sd.OutputStream(
+                samplerate=self.sample_rate,
+                channels=self.channels,
+                dtype='int16'
+            )
+            self._stream.start()
+    
+    def write(self, audio_data: np.ndarray):
+        """Write audio data to the persistent stream."""
+        with self._lock:
+            self._ensure_stream()
+            try:
+                self._stream.write(audio_data)
+            except Exception as e:
+                print(f"⚠️  Audio write error: {e}")
+                # Try to recover by recreating stream
+                self._stream = None
+                self._ensure_stream()
+                self._stream.write(audio_data)
+    
+    def close(self):
+        """Close the stream (call on shutdown)."""
+        with self._lock:
+            if self._stream is not None:
+                try:
+                    self._stream.stop()
+                    self._stream.close()
+                except Exception:
+                    pass
+                self._stream = None
+
+
+# Global persistent audio output (initialized after piper_voice is loaded)
+tts_audio_output = None
+if piper_voice:
+    tts_audio_output = PersistentAudioOutput(
+        sample_rate=piper_voice.config.sample_rate,
+        channels=1
+    )
+
 # === Worker Thread for Non-Blocking Processing ===
 # This allows wakeword detection to continue while processing commands
 
@@ -380,26 +442,41 @@ def capture_audio_only():
     Record audio with VAD and return the path to the saved file.
     This runs in the main thread to keep audio capture real-time safe.
     Returns the path to the audio file, or None if recording failed.
+    
+    Optimized for Raspberry Pi 5:
+    - Ring buffer instead of np.concatenate (O(1) vs O(n))
+    - Pre-allocated tensor buffer to avoid allocations in hot loop
+    - Grace period before checking silence (time to collect thoughts)
     """
     print("🎤 Jarvis is listening...")
 
     CHUNK = 1024
     RATE = 16000
-    MAX_RECORD_SECONDS = 10
-    MIN_RECORD_SECONDS = 0.5
-    SILENCE_DURATION = 1.5
+    MAX_RECORD_SECONDS = 15      # Extended max recording time
+    GRACE_PERIOD_SECONDS = 1.5   # Wait this long before checking for silence
+    SILENCE_DURATION = 2.0       # Require 2s of silence to stop (was 1.5s)
     
     frames = []
     temp_stream = pa.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
     
     if vad_available:
-        VAD_CHUNK = 512
+        VAD_CHUNK = 512  # Silero VAD requires exactly 512 samples for 16kHz
         silence_chunks = 0
         silence_threshold = int(SILENCE_DURATION * RATE / VAD_CHUNK)
         max_chunks = int(MAX_RECORD_SECONDS * RATE / CHUNK)
-        min_chunks = int(MIN_RECORD_SECONDS * RATE / CHUNK)
+        grace_chunks = int(GRACE_PERIOD_SECONDS * RATE / CHUNK)
         
-        vad_buffer = np.array([], dtype=np.int16)
+        # Pre-allocate ring buffer for VAD (avoids O(n) concatenation)
+        RING_SIZE = VAD_CHUNK * 4  # Hold ~4 VAD windows
+        ring_buffer = np.zeros(RING_SIZE, dtype=np.int16)
+        ring_write_pos = 0
+        ring_read_pos = 0
+        ring_available = 0
+        
+        # Pre-allocate tensor buffer (reused each iteration)
+        vad_tensor_buffer = torch.zeros(VAD_CHUNK, dtype=torch.float32)
+        
+        speech_detected = False  # Track if we've heard any speech yet
         
         for i in range(max_chunks):
             try:
@@ -410,27 +487,61 @@ def capture_audio_only():
             
             frames.append(data)
             
+            # Write to ring buffer (O(1) operation)
             audio_int16 = np.frombuffer(data, dtype=np.int16)
-            vad_buffer = np.concatenate([vad_buffer, audio_int16])
+            chunk_len = len(audio_int16)
             
-            while len(vad_buffer) >= VAD_CHUNK:
-                vad_chunk = vad_buffer[:VAD_CHUNK]
-                vad_buffer = vad_buffer[VAD_CHUNK:]
+            # Handle wrap-around in ring buffer
+            end_pos = ring_write_pos + chunk_len
+            if end_pos <= RING_SIZE:
+                ring_buffer[ring_write_pos:end_pos] = audio_int16
+            else:
+                first_part = RING_SIZE - ring_write_pos
+                ring_buffer[ring_write_pos:] = audio_int16[:first_part]
+                ring_buffer[:chunk_len - first_part] = audio_int16[first_part:]
+            
+            ring_write_pos = end_pos % RING_SIZE
+            ring_available += chunk_len
+            
+            # Process VAD in 512-sample chunks from ring buffer
+            while ring_available >= VAD_CHUNK:
+                # Read from ring buffer (O(1) operation)
+                if ring_read_pos + VAD_CHUNK <= RING_SIZE:
+                    vad_chunk = ring_buffer[ring_read_pos:ring_read_pos + VAD_CHUNK]
+                else:
+                    first_part = RING_SIZE - ring_read_pos
+                    vad_chunk = np.concatenate([
+                        ring_buffer[ring_read_pos:],
+                        ring_buffer[:VAD_CHUNK - first_part]
+                    ])
                 
-                audio_float32 = vad_chunk.astype(np.float32) / 32768.0
-                audio_tensor = torch.from_numpy(audio_float32)
+                ring_read_pos = (ring_read_pos + VAD_CHUNK) % RING_SIZE
+                ring_available -= VAD_CHUNK
+                
+                # Convert to tensor in-place (reuse buffer)
+                vad_tensor_buffer[:] = torch.from_numpy(vad_chunk.astype(np.float32) / 32768.0)
                 
                 try:
-                    speech_prob = vad_model(audio_tensor, RATE).item()
-                    if speech_prob < 0.5:
-                        silence_chunks += 1
-                    else:
+                    speech_prob = vad_model(vad_tensor_buffer, RATE).item()
+                    
+                    if speech_prob >= 0.5:
+                        speech_detected = True
                         silence_chunks = 0
+                    else:
+                        silence_chunks += 1
                 except Exception:
                     pass
             
-            if i >= min_chunks and silence_chunks >= silence_threshold:
+            # Only check for end-of-speech after grace period
+            # AND only if we've detected speech at some point
+            if i >= grace_chunks and speech_detected and silence_chunks >= silence_threshold:
                 print(f"🛑 Speech ended (recorded {len(frames) * CHUNK / RATE:.1f}s)")
+                break
+            
+            # Also stop if we've been in grace period and heard nothing at all
+            # (prevents hanging if user doesn't speak)
+            if i >= grace_chunks * 2 and not speech_detected:
+                print(f"🛑 No speech detected (waited {len(frames) * CHUNK / RATE:.1f}s)")
                 break
     else:
         RECORD_SECONDS = 4
@@ -465,19 +576,27 @@ def capture_and_process():
         assistant_worker.submit(audio_path)
 
 def speak_tts(text):
-    """Speak text using Piper TTS with direct audio playback."""
-    if text and piper_voice:
+    """
+    Speak text using Piper TTS with persistent audio stream.
+    
+    Optimized for Pi5: Uses persistent audio output stream to avoid
+    ~50-100ms overhead of creating/destroying streams per utterance.
+    """
+    if text and piper_voice and tts_audio_output:
+        for audio_chunk in piper_voice.synthesize(text):
+            int_data = np.frombuffer(audio_chunk.audio_int16_bytes, dtype=np.int16)
+            tts_audio_output.write(int_data)
+    elif text and piper_voice:
+        # Fallback to per-call stream if persistent output not available
         stream = sd.OutputStream(
             samplerate=piper_voice.config.sample_rate,
             channels=1,
             dtype='int16'
         )
         stream.start()
-        
         for audio_chunk in piper_voice.synthesize(text):
             int_data = np.frombuffer(audio_chunk.audio_int16_bytes, dtype=np.int16)
             stream.write(int_data)
-        
         stream.stop()
         stream.close()
     elif text and not piper_voice:
@@ -555,6 +674,8 @@ except KeyboardInterrupt:
     ui_bridge.stop()
     event_bus.stop()
     assistant_worker.stop()
+    if tts_audio_output is not None:
+        tts_audio_output.close()
     if porcupine is not None:
         porcupine.delete()
     if audio_stream is not None:
