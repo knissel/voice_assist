@@ -404,8 +404,8 @@ def speak(text):
     """
     Speak text using GPU TTS (XTTS) with Piper fallback.
     
-    Tries GPU server first for higher quality, falls back to local Piper
-    if server is unavailable or times out.
+    Tries GPU streaming first for lowest latency, falls back to non-streaming,
+    then to local Piper if server is unavailable.
     """
     # Preprocess text for more natural TTS
     text = preprocess_for_tts(text)
@@ -415,8 +415,13 @@ def speak(text):
     
     print(f"💬 {text}")
     
-    # Try GPU TTS first if available
+    # Try GPU TTS streaming first (lowest latency)
     if gpu_tts_client and tts_audio_output:
+        # Try streaming first - plays audio as it's generated
+        if gpu_tts_client.synthesize_stream(text, tts_audio_output):
+            return
+        
+        # Fall back to non-streaming if streaming fails
         result = gpu_tts_client.synthesize(text, prefer_gpu=True)
         if result is not None:
             audio_data, sample_rate = result

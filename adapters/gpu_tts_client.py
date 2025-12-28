@@ -154,6 +154,97 @@ class GPUTTSClient:
             self._gpu_failures += 1
             return None
     
+    def synthesize_stream(self, text: str, audio_output) -> bool:
+        """
+        Stream synthesis - plays audio chunks as they're generated.
+        
+        This significantly reduces time-to-first-audio compared to synthesize().
+        
+        Args:
+            text: Text to synthesize
+            audio_output: Audio output object with write() and sample_rate attributes
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not text:
+            return False
+        
+        with self._lock:
+            if not self._check_server_health():
+                logger.info("GPU server not healthy, falling back to non-streaming")
+                return False
+        
+        try:
+            start = time.time()
+            chunk_count = 0
+            total_samples = 0
+            
+            # Use streaming endpoint with iter_content
+            response = requests.post(
+                f"{self.server_url}/synthesize_stream",
+                json={"text": text, "language": self.language},
+                timeout=self.timeout,
+                stream=True  # Enable streaming response
+            )
+            
+            if response.status_code != 200:
+                logger.warning(f"GPU TTS stream error: {response.status_code}")
+                self._gpu_failures += 1
+                return False
+            
+            sample_rate = int(response.headers.get('X-Sample-Rate', 24000))
+            
+            # Buffer for accumulating chunks (for resampling)
+            # We need to resample from 24kHz to audio_output.sample_rate
+            target_rate = getattr(audio_output, 'sample_rate', sample_rate)
+            
+            # Read and play chunks as they arrive
+            # Use larger chunk size for network efficiency, smaller for low latency
+            for raw_chunk in response.iter_content(chunk_size=4800):  # ~100ms at 24kHz int16
+                if not raw_chunk:
+                    continue
+                
+                audio_chunk = np.frombuffer(raw_chunk, dtype=np.int16)
+                total_samples += len(audio_chunk)
+                chunk_count += 1
+                
+                # Log time-to-first-audio
+                if chunk_count == 1:
+                    ttfa = time.time() - start
+                    logger.info(f"GPU TTS stream: first audio in {ttfa:.3f}s")
+                
+                # Resample if needed
+                if target_rate != sample_rate:
+                    audio_chunk = self._resample(audio_chunk, sample_rate, target_rate)
+                
+                # Play immediately
+                audio_output.write(audio_chunk)
+            
+            elapsed = time.time() - start
+            audio_duration = total_samples / sample_rate
+            self._gpu_calls += 1
+            
+            logger.info(f"GPU TTS stream: {len(text)} chars, {chunk_count} chunks, "
+                       f"{audio_duration:.1f}s audio in {elapsed:.2f}s")
+            
+            return True
+            
+        except requests.exceptions.Timeout:
+            logger.warning(f"GPU TTS stream timeout after {self.timeout}s")
+            self._gpu_failures += 1
+            return False
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"GPU TTS stream request failed: {e}")
+            self._gpu_failures += 1
+            self._server_healthy = False
+            self._last_health_check = time.time()
+            return False
+        except Exception as e:
+            logger.error(f"GPU TTS stream unexpected error: {e}")
+            self._gpu_failures += 1
+            return False
+    
     def _synthesize_piper(self, text: str) -> Optional[tuple[np.ndarray, int]]:
         """Synthesize using local Piper. Returns (audio_data, sample_rate) or None."""
         if self.piper_voice is None:

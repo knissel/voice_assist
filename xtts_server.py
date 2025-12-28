@@ -13,7 +13,7 @@ import io
 import os
 import time
 import logging
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response
 import torch
 import torchaudio
 import soundfile as sf
@@ -221,6 +221,97 @@ def synthesize():
     except Exception as e:
         logger.error(f"Synthesis error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/synthesize_stream', methods=['POST'])
+def synthesize_stream():
+    """
+    Streaming synthesis - returns audio chunks as they're generated.
+    
+    Expects JSON: {"text": "Hello world", "language": "en"}
+    Returns: Raw PCM int16 audio stream at 24kHz, chunked
+    
+    Headers in response:
+    - X-Sample-Rate: 24000
+    - Content-Type: audio/pcm
+    """
+    global gpt_cond_latent, speaker_embedding
+    
+    if model is None:
+        return jsonify({"error": "Model not loaded"}), 500
+    
+    data = request.get_json()
+    if not data or 'text' not in data:
+        return jsonify({"error": "No text provided"}), 400
+    
+    text = data['text']
+    language = data.get('language', 'en')
+    
+    # Use default speaker if none loaded
+    if speaker_embedding is None:
+        logger.warning("No speaker reference loaded, using default speaker")
+        try:
+            sample_path = os.path.join(os.path.dirname(__file__), "speaker_reference.wav")
+            if os.path.exists(sample_path):
+                load_speaker_reference(sample_path)
+            else:
+                return jsonify({"error": "No speaker reference configured"}), 500
+        except Exception as e:
+            return jsonify({"error": f"Speaker setup failed: {e}"}), 500
+    
+    def generate_audio_chunks():
+        """Generator that yields audio chunks as they're synthesized."""
+        start_time = time.time()
+        chunk_count = 0
+        total_samples = 0
+        
+        try:
+            # Use streaming inference
+            chunks = model.inference_stream(
+                text=text,
+                language=language,
+                gpt_cond_latent=gpt_cond_latent,
+                speaker_embedding=speaker_embedding,
+                temperature=0.7,
+                length_penalty=1.0,
+                repetition_penalty=10.0,
+                top_k=50,
+                top_p=0.85,
+                stream_chunk_size=20,  # Smaller chunks = lower latency
+            )
+            
+            for chunk in chunks:
+                # Convert torch tensor to numpy int16
+                if isinstance(chunk, torch.Tensor):
+                    audio_np = chunk.cpu().numpy()
+                else:
+                    audio_np = chunk
+                
+                # Normalize to int16 range
+                audio_int16 = (audio_np * 32767).astype('int16')
+                total_samples += len(audio_int16)
+                chunk_count += 1
+                
+                # Log first chunk timing (time-to-first-audio)
+                if chunk_count == 1:
+                    ttfa = time.time() - start_time
+                    logger.info(f"Stream: first chunk in {ttfa:.3f}s ({len(audio_int16)} samples)")
+                
+                yield audio_int16.tobytes()
+            
+            elapsed = time.time() - start_time
+            audio_duration = total_samples / 24000
+            logger.info(f"Stream complete: {chunk_count} chunks, {audio_duration:.1f}s audio in {elapsed:.2f}s")
+            
+        except Exception as e:
+            logger.error(f"Streaming synthesis error: {e}")
+            return
+    
+    response = Response(generate_audio_chunks(), mimetype='audio/pcm')
+    response.headers['X-Sample-Rate'] = '24000'
+    response.headers['X-Channels'] = '1'
+    response.headers['X-Format'] = 'int16'
+    return response
 
 
 @app.route('/set_speaker', methods=['POST'])
