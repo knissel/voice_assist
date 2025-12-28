@@ -19,6 +19,8 @@ from google.genai import types
 from piper.voice import PiperVoice
 from tools.registry import GEMINI_TOOLS, dispatch_tool
 from tools.transcription import create_transcription_service
+from core.tts_preprocessing import preprocess_for_tts
+from adapters.gpu_tts_client import GPUTTSClient
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -157,6 +159,22 @@ if piper_voice:
         sample_rate=piper_voice.config.sample_rate,
         channels=1
     )
+
+# Initialize GPU TTS client with Piper fallback
+XTTS_SERVER_URL = os.getenv("XTTS_SERVER_URL", "http://localhost:5001")
+USE_GPU_TTS = os.getenv("USE_GPU_TTS", "true").lower() == "true"
+
+gpu_tts_client = None
+if USE_GPU_TTS:
+    gpu_tts_client = GPUTTSClient(
+        server_url=XTTS_SERVER_URL,
+        piper_voice=piper_voice,
+        piper_sample_rate=piper_voice.config.sample_rate if piper_voice else 22050,
+        timeout_seconds=3.0
+    )
+    print(f"🔊 GPU TTS enabled: {XTTS_SERVER_URL}")
+else:
+    print("🔊 Using local Piper TTS only")
 
 # === PIPELINE FUNCTIONS ===
 def record_audio():
@@ -330,7 +348,13 @@ def llm_respond_or_tool_call(user_text):
     
     if needs_search and not needs_tools:
         # Use Google Search for real-time info
-        system_instruction = f"You are Jarvis, a helpful voice assistant. {location_context} Answer concisely in 1-2 sentences."
+        system_instruction = f"""You are Jarvis, a helpful voice assistant. {location_context}
+
+IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for natural speech:
+- Say "high of 58" not "58°F" or "58 degrees F"
+- Say "around 3 PM" not "3:00 PM"
+- Use conversational language, avoid abbreviations
+- Keep responses to 1-2 sentences max"""
         google_search_tool = types.Tool(google_search=types.GoogleSearch())
         
         response = client.models.generate_content(
@@ -350,7 +374,10 @@ For lighting commands, IMMEDIATELY call control_home_lighting function with NO e
 Device IDs: Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89.
 For ALL lights: use device_id=999 with brightness=100 (ON) or brightness=0 (OFF).
 
-For all other questions, answer concisely in 1-2 sentences max."""
+IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for natural speech:
+- Say "high of 58" not "58°F" or "58 degrees F"
+- Use conversational language, avoid abbreviations
+- Keep responses to 1-2 sentences max"""
         
         response = client.models.generate_content(
             model=MODEL_NAME,
@@ -375,19 +402,39 @@ For all other questions, answer concisely in 1-2 sentences max."""
 
 def speak(text):
     """
-    Speak text using Piper TTS with persistent audio stream.
+    Speak text using GPU TTS (XTTS) with Piper fallback.
     
-    Optimized for Pi5: Uses persistent audio output stream to avoid
-    ~50-100ms overhead of creating/destroying streams per utterance.
+    Tries GPU server first for higher quality, falls back to local Piper
+    if server is unavailable or times out.
     """
-    if text and piper_voice and tts_audio_output:
-        print(f"💬 {text}")
+    # Preprocess text for more natural TTS
+    text = preprocess_for_tts(text)
+    
+    if not text:
+        return
+    
+    print(f"💬 {text}")
+    
+    # Try GPU TTS first if available
+    if gpu_tts_client and tts_audio_output:
+        result = gpu_tts_client.synthesize(text, prefer_gpu=True)
+        if result is not None:
+            audio_data, sample_rate = result
+            # Resample if needed (GPU outputs 24kHz, Piper outputs 22050Hz)
+            if sample_rate != tts_audio_output.sample_rate:
+                audio_data = gpu_tts_client._resample(
+                    audio_data, sample_rate, tts_audio_output.sample_rate
+                )
+            tts_audio_output.write(audio_data)
+            return
+    
+    # Fallback to direct Piper if GPU client not configured
+    if piper_voice and tts_audio_output:
         for audio_chunk in piper_voice.synthesize(text):
             int_data = np.frombuffer(audio_chunk.audio_int16_bytes, dtype=np.int16)
             tts_audio_output.write(int_data)
-    elif text and piper_voice:
+    elif piper_voice:
         # Fallback to per-call stream if persistent output not available
-        print(f"💬 {text}")
         stream = sd.OutputStream(
             samplerate=piper_voice.config.sample_rate,
             channels=1,
@@ -399,8 +446,8 @@ def speak(text):
             stream.write(int_data)
         stream.stop()
         stream.close()
-    elif text and not piper_voice:
-        print(f"⚠️  Cannot speak: '{text}' - Piper model not loaded")
+    else:
+        print(f"⚠️  Cannot speak: '{text}' - No TTS available")
 
 # === MAIN LOOP ===
 def on_press(key):

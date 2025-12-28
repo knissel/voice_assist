@@ -4,3 +4,7 @@
 faster-whisper>=1.0.0
 flask>=3.0.0
 torch>=2.0.0
+torchaudio>=2.0.0
+
+# XTTS v2 TTS (high quality neural TTS)
+TTS>=0.22.0
