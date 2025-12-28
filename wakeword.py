@@ -18,6 +18,7 @@ from google.genai import types
 from piper.voice import PiperVoice
 from tools.registry import GEMINI_TOOLS, dispatch_tool
 from tools.transcription import create_transcription_service
+from tools.audio import pause_media, resume_media
 from core.tts_preprocessing import preprocess_for_tts
 from adapters.gpu_tts_client import GPUTTSClient
 from core.event_bus import (
@@ -353,6 +354,7 @@ class AssistantWorker:
             print("❌ No speech detected")
             emit_error(self.bus, "NO_SPEECH", "No speech detected in audio")
             emit_state_changed(self.bus, "transcribing", "idle")
+            resume_media()  # Resume music if we paused it
             return
         
         print(f"📝 You said: {user_command}")
@@ -447,12 +449,14 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
                     emit_state_changed(self.bus, "executing", "speaking")
                     speak_tts("Done")
                     emit_state_changed(self.bus, "speaking", "idle")
+                    resume_media()  # Resume music if we paused it
                 elif response.text:
                     print(f"💬 Jarvis: {response.text}")
                     emit_assistant_text(self.bus, response.text)
                     emit_state_changed(self.bus, "thinking", "speaking")
                     speak_tts(response.text)
                     emit_state_changed(self.bus, "speaking", "idle")
+                    resume_media()  # Resume music if we paused it
         
         except Exception as e:
             print(f"❌ Gemini API failed: {e}")
@@ -460,6 +464,7 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
             emit_state_changed(self.bus, "thinking", "speaking")
             speak_tts("I'm having trouble connecting to my brain.")
             emit_state_changed(self.bus, "speaking", "idle")
+            resume_media()  # Resume music if we paused it
 
 # Global worker instance
 assistant_worker = AssistantWorker(event_bus)
@@ -706,6 +711,11 @@ try:
                 continue
             
             print("🔔 Wake word detected!")
+            
+            # Auto-pause any playing music so user doesn't have to talk over it
+            if pause_media():
+                print("⏸️  Paused media playback")
+            
             event_bus.emit("wakeword_detected", {"keyword_index": keyword_index})
             emit_state_changed(event_bus, "idle", "listening")
             

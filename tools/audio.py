@@ -338,3 +338,184 @@ def control_volume(action: str, level: int = None):
     
     else:
         return f"Invalid action: {action}. Use 'up', 'down', or 'set'."
+
+
+# Track whether we paused media (to know if we should resume)
+_media_was_playing = False
+
+
+def pause_media():
+    """
+    Pause any currently playing media.
+    Works with common media players on macOS and Linux.
+    
+    Returns:
+        True if media was paused, False otherwise
+    """
+    global _media_was_playing
+    system = platform.system()
+    
+    if system == "Darwin":  # macOS
+        # Use AppleScript to send pause to the system
+        # This works with Music, Spotify, and other media apps
+        scripts = [
+            # Try Spotify first
+            '''
+            tell application "System Events"
+                if exists (processes where name is "Spotify") then
+                    tell application "Spotify" to pause
+                    return "spotify"
+                end if
+            end tell
+            return "none"
+            ''',
+            # Try Apple Music
+            '''
+            tell application "System Events"
+                if exists (processes where name is "Music") then
+                    tell application "Music"
+                        if player state is playing then
+                            pause
+                            return "music"
+                        end if
+                    end tell
+                end if
+            end tell
+            return "none"
+            ''',
+        ]
+        
+        for script in scripts:
+            try:
+                result = subprocess.run(
+                    ["osascript", "-e", script],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                if result.returncode == 0 and result.stdout.strip() not in ["none", ""]:
+                    _media_was_playing = True
+                    return True
+            except Exception:
+                pass
+        
+        # Fallback: send media key pause to frontmost app
+        try:
+            subprocess.run(
+                ["osascript", "-e", 'tell application "System Events" to key code 16 using {command down}'],
+                capture_output=True,
+                timeout=1
+            )
+        except Exception:
+            pass
+        
+        return False
+    
+    elif system == "Linux":
+        # Use playerctl for Linux (works with most media players)
+        try:
+            # Check if something is playing
+            status_result = subprocess.run(
+                ["playerctl", "status"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if status_result.returncode == 0 and "Playing" in status_result.stdout:
+                # Pause it
+                subprocess.run(
+                    ["playerctl", "pause"],
+                    capture_output=True,
+                    timeout=2
+                )
+                _media_was_playing = True
+                return True
+        except FileNotFoundError:
+            # playerctl not installed - try pactl for PulseAudio streams
+            pass
+        except Exception:
+            pass
+        
+        return False
+    
+    return False
+
+
+def resume_media():
+    """
+    Resume media playback if it was paused by pause_media().
+    Only resumes if we previously paused the media.
+    
+    Returns:
+        True if media was resumed, False otherwise
+    """
+    global _media_was_playing
+    
+    if not _media_was_playing:
+        return False
+    
+    system = platform.system()
+    
+    if system == "Darwin":  # macOS
+        scripts = [
+            # Try Spotify
+            '''
+            tell application "System Events"
+                if exists (processes where name is "Spotify") then
+                    tell application "Spotify" to play
+                    return "spotify"
+                end if
+            end tell
+            return "none"
+            ''',
+            # Try Apple Music
+            '''
+            tell application "System Events"
+                if exists (processes where name is "Music") then
+                    tell application "Music" to play
+                    return "music"
+                end if
+            end tell
+            return "none"
+            ''',
+        ]
+        
+        for script in scripts:
+            try:
+                result = subprocess.run(
+                    ["osascript", "-e", script],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                if result.returncode == 0 and result.stdout.strip() not in ["none", ""]:
+                    _media_was_playing = False
+                    return True
+            except Exception:
+                pass
+        
+        _media_was_playing = False
+        return False
+    
+    elif system == "Linux":
+        try:
+            subprocess.run(
+                ["playerctl", "play"],
+                capture_output=True,
+                timeout=2
+            )
+            _media_was_playing = False
+            return True
+        except Exception:
+            pass
+        
+        _media_was_playing = False
+        return False
+    
+    _media_was_playing = False
+    return False
+
+
+def is_media_paused_by_assistant():
+    """Check if we paused media and should resume later."""
+    return _media_was_playing
