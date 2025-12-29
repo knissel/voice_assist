@@ -10,6 +10,7 @@ from tools.bluetooth import connect_bluetooth_device, disconnect_bluetooth_devic
 from tools.audio import route_to_bluetooth, set_audio_sink, get_audio_sinks, control_volume, pause_audio, resume_audio
 from tools.youtube_music import play_youtube_music, stop_music
 from tools.timer import set_timer, cancel_timer, list_timers, check_timer
+from tools.recipes import pizza_dough_recipe
 
 # Tool specifications in Gemini format
 GEMINI_TOOLS = [
@@ -162,6 +163,31 @@ GEMINI_TOOLS = [
                 parameters=types.Schema(
                     type="OBJECT",
                     properties={},
+                    required=[]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="pizza_dough_recipe",
+                description=(
+                    "Create or adjust a pizza dough recipe using baker's percentages. "
+                    "Use for Neapolitan dough requests or when user says to adjust hydration. "
+                    "If only a change is provided (e.g., hydration_percent), reuse the last recipe."
+                ),
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "style": types.Schema(type="STRING", description="Pizza style, e.g. 'neapolitan'"),
+                        "ball_weight_g": types.Schema(type="NUMBER", description="Target dough ball weight in grams"),
+                        "ball_count": types.Schema(type="INTEGER", description="Number of dough balls"),
+                        "hydration_percent": types.Schema(type="NUMBER", description="Hydration percentage (e.g., 62)"),
+                        "salt_percent": types.Schema(type="NUMBER", description="Salt percentage (e.g., 2.8)"),
+                        "yeast_percent": types.Schema(type="NUMBER", description="Instant yeast percentage (e.g., 0.1)"),
+                        "oil_percent": types.Schema(type="NUMBER", description="Oil percentage (0 for Neapolitan)"),
+                        "bake_temp_f": types.Schema(type="INTEGER", description="Bake temperature in Fahrenheit"),
+                        "cold_ferment_hours": types.Schema(type="NUMBER", description="Cold ferment duration in hours"),
+                        "room_temp_hours": types.Schema(type="NUMBER", description="Room temperature proof duration in hours"),
+                        "use_last": types.Schema(type="BOOLEAN", description="Use last recipe as base when fields are omitted")
+                    },
                     required=[]
                 )
             )
@@ -337,6 +363,63 @@ TOOL_SPECS = [
                 "required": ["action"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "pizza_dough_recipe",
+            "description": "Create or adjust a pizza dough recipe using baker's percentages. Use for Neapolitan dough requests or hydration adjustments. If only a change is provided, reuse the last recipe.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "style": {
+                        "type": "string",
+                        "description": "Pizza style, e.g. 'neapolitan'"
+                    },
+                    "ball_weight_g": {
+                        "type": "number",
+                        "description": "Target dough ball weight in grams"
+                    },
+                    "ball_count": {
+                        "type": "integer",
+                        "description": "Number of dough balls"
+                    },
+                    "hydration_percent": {
+                        "type": "number",
+                        "description": "Hydration percentage (e.g., 62)"
+                    },
+                    "salt_percent": {
+                        "type": "number",
+                        "description": "Salt percentage (e.g., 2.8)"
+                    },
+                    "yeast_percent": {
+                        "type": "number",
+                        "description": "Instant yeast percentage (e.g., 0.1)"
+                    },
+                    "oil_percent": {
+                        "type": "number",
+                        "description": "Oil percentage (0 for Neapolitan)"
+                    },
+                    "bake_temp_f": {
+                        "type": "integer",
+                        "description": "Bake temperature in Fahrenheit"
+                    },
+                    "cold_ferment_hours": {
+                        "type": "number",
+                        "description": "Cold ferment duration in hours"
+                    },
+                    "room_temp_hours": {
+                        "type": "number",
+                        "description": "Room temperature proof duration in hours"
+                    },
+                    "use_last": {
+                        "type": "boolean",
+                        "description": "Use last recipe as base when fields are omitted"
+                    }
+                },
+                "required": []
+            }
+        }
     }
 ]
 
@@ -355,7 +438,8 @@ TOOL_FUNCTIONS = {
     "set_timer": set_timer,
     "cancel_timer": cancel_timer,
     "check_timer": check_timer,
-    "list_timers": list_timers
+    "list_timers": list_timers,
+    "pizza_dough_recipe": pizza_dough_recipe
 }
 
 def dispatch_tool(name: str, args: dict) -> str:

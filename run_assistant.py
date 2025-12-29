@@ -439,6 +439,7 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
 For lighting commands, IMMEDIATELY call control_home_lighting function with NO explanation.
 Device IDs: Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89.
 For ALL lights: use device_id=999 with brightness=100 (ON) or brightness=0 (OFF).
+For pizza dough recipes or hydration adjustments, call pizza_dough_recipe with the requested parameters.
 
 IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for natural speech:
 - Say "high of 58" not "58°F" or "58 degrees F"

@@ -153,6 +153,14 @@
             overflow: hidden;
         }
 
+        .side-panel {
+            display: grid;
+            grid-template-rows: minmax(0, 1.15fr) minmax(0, 0.85fr);
+            gap: 16px;
+            overflow: hidden;
+            min-height: 0;
+        }
+
         /* Conversation Panel */
         .conversation-panel {
             background: var(--bg-secondary);
@@ -161,6 +169,7 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            min-height: 0;
         }
 
         .panel-title {
@@ -230,6 +239,7 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            min-height: 0;
         }
 
         .timers-list {
@@ -344,6 +354,144 @@
         }
 
         .no-timers-icon {
+            font-size: 48px;
+            opacity: 0.5;
+        }
+
+        /* Recipe Panel */
+        .recipe-panel {
+            background: var(--bg-secondary);
+            border-radius: 20px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        .recipe-card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .recipe-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .recipe-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .recipe-subtitle {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .recipe-pill {
+            background: linear-gradient(135deg, var(--accent-orange), var(--accent-red));
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 4px 8px;
+            border-radius: 999px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+
+        .recipe-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .recipe-tag {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 4px 8px;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .recipe-section-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-secondary);
+        }
+
+        .recipe-ingredients {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 6px 12px;
+            align-items: center;
+            font-size: 13px;
+        }
+
+        .ingredient-amount {
+            font-variant-numeric: tabular-nums;
+        }
+
+        .ingredient-percent {
+            color: var(--text-secondary);
+            font-size: 11px;
+        }
+
+        .recipe-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .recipe-step {
+            display: flex;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .recipe-step-number {
+            width: 18px;
+            height: 18px;
+            border-radius: 6px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            flex-shrink: 0;
+        }
+
+        .recipe-updated {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        .no-recipe {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            text-align: center;
+            gap: 12px;
+        }
+
+        .no-recipe-icon {
             font-size: 48px;
             opacity: 0.5;
         }
@@ -631,6 +779,49 @@
             .action-label {
                 font-size: 10px;
             }
+
+            .side-panel {
+                gap: 8px;
+            }
+
+            .recipe-panel {
+                padding: 12px;
+            }
+
+            .recipe-card {
+                padding: 12px;
+            }
+
+            .recipe-title {
+                font-size: 14px;
+            }
+
+            .recipe-ingredients {
+                font-size: 12px;
+            }
+
+            .recipe-step {
+                font-size: 11px;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .container {
+                padding: 12px;
+            }
+
+            .main-content {
+                grid-template-columns: 1fr;
+                grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+            }
+
+            .side-panel {
+                grid-template-rows: minmax(0, 1.1fr) minmax(0, 0.9fr);
+            }
+
+            .quick-actions {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
     </style>
 </head>
@@ -660,23 +851,43 @@
                 </div>
             </section>
 
-            <!-- Timers Panel -->
-            <section class="timers-panel">
-                <h2 class="panel-title">Timers</h2>
-                <div class="timers-list" id="timersList">
-                    <div class="no-timers">
-                        <div class="no-timers-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="13" r="8" fill="none" stroke-width="2"></circle>
-                                <path d="M12 13V9" stroke-width="2" stroke-linecap="round"></path>
-                                <path d="M9 2h6" stroke-width="2" stroke-linecap="round"></path>
-                            </svg>
+            <div class="side-panel">
+                <!-- Timers Panel -->
+                <section class="timers-panel">
+                    <h2 class="panel-title">Timers</h2>
+                    <div class="timers-list" id="timersList">
+                        <div class="no-timers">
+                            <div class="no-timers-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <circle cx="12" cy="13" r="8" fill="none" stroke-width="2"></circle>
+                                    <path d="M12 13V9" stroke-width="2" stroke-linecap="round"></path>
+                                    <path d="M9 2h6" stroke-width="2" stroke-linecap="round"></path>
+                                </svg>
+                            </div>
+                            <div>No active timers</div>
+                            <div style="font-size: 12px;">Say "Set a timer for 5 minutes"</div>
                         </div>
-                        <div>No active timers</div>
-                        <div style="font-size: 12px;">Say "Set a timer for 5 minutes"</div>
                     </div>
-                </div>
-            </section>
+                </section>
+
+                <!-- Recipe Panel -->
+                <section class="recipe-panel">
+                    <h2 class="panel-title">Recipe</h2>
+                    <div class="recipe-card" id="recipeCard">
+                        <div class="no-recipe">
+                            <div class="no-recipe-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M3 7c5-3 13-3 18 0l-9 14L3 7z" fill="none" stroke-width="2" stroke-linejoin="round"></path>
+                                    <circle cx="10" cy="12" r="1" fill="currentColor"></circle>
+                                    <circle cx="14" cy="10" r="1" fill="currentColor"></circle>
+                                </svg>
+                            </div>
+                            <div>No recipe yet</div>
+                            <div style="font-size: 12px;">Ask for a pizza dough recipe</div>
+                        </div>
+                    </div>
+                </section>
+            </div>
         </main>
 
         <!-- Quick Actions -->
@@ -761,6 +972,7 @@
         // State
         let timers = {};
         let currentState = 'idle';
+        let currentRecipe = null;
 
         // Connect to WebSocket
         function connect() {
@@ -828,6 +1040,9 @@
                         addToolMessage(event.data.tool_name, null, event.data.result, true);
                     }
                     break;
+                case 'ui_card':
+                    handleUICard(event.data);
+                    break;
                 case 'timer_started':
                     addTimer(event.data);
                     break;
@@ -872,6 +1087,121 @@
             textEl.textContent = text;
         }
 
+        function handleUICard(data) {
+            if (!data || !data.card) {
+                return;
+            }
+            if (data.card.card_type === 'recipe') {
+                currentRecipe = data.card;
+                renderRecipe();
+            }
+        }
+
+        function formatGrams(value) {
+            if (value === null || value === undefined || Number.isNaN(value)) {
+                return '';
+            }
+            const grams = Number(value);
+            if (grams < 1) {
+                return `${grams.toFixed(2)}g`;
+            }
+            if (grams < 10) {
+                return `${grams.toFixed(1)}g`;
+            }
+            return `${Math.round(grams)}g`;
+        }
+
+        function formatRecipeTags(data) {
+            const tags = [];
+            if (data.ball_count && data.ball_weight_g) {
+                tags.push(`${data.ball_count} x ${Math.round(data.ball_weight_g)}g`);
+            }
+            if (data.total_dough_g) {
+                tags.push(`${Math.round(data.total_dough_g)}g total`);
+            }
+            if (data.hydration_percent !== undefined) {
+                tags.push(`${data.hydration_percent}% hydration`);
+            }
+            if (data.cold_ferment_hours) {
+                tags.push(`${data.cold_ferment_hours}h cold`);
+            }
+            if (data.bake_temp_f) {
+                tags.push(`${data.bake_temp_f}F bake`);
+            }
+            return tags;
+        }
+
+        function renderRecipe() {
+            const cardEl = document.getElementById('recipeCard');
+            if (!cardEl || !currentRecipe) {
+                return;
+            }
+
+            const data = currentRecipe.data || {};
+            const title = currentRecipe.title || 'Recipe';
+            const subtitle = currentRecipe.subtitle || '';
+            const style = typeof data.style === 'string' ? data.style.toUpperCase() : 'RECIPE';
+            const tags = formatRecipeTags(data);
+
+            const ingredients = Array.isArray(data.ingredients) ? data.ingredients : [];
+            const ingredientsHtml = ingredients.length
+                ? ingredients.map(item => {
+                    const grams = formatGrams(item.grams);
+                    const percent = item.bakers_percent !== undefined ? `${item.bakers_percent}%` : '';
+                    return `
+                        <div class="ingredient-name">${item.name || 'Ingredient'}</div>
+                        <div class="ingredient-amount">${grams}</div>
+                        <div class="ingredient-percent">${percent}</div>
+                    `;
+                }).join('')
+                : `
+                    <div class="ingredient-name">No ingredients yet</div>
+                    <div class="ingredient-amount"></div>
+                    <div class="ingredient-percent"></div>
+                `;
+
+            const steps = Array.isArray(data.steps) ? data.steps.slice(0, 4) : [];
+            const stepsHtml = steps.length
+                ? steps.map((step, index) => {
+                    const number = step.number || index + 1;
+                    const instruction = step.instruction || step;
+                    return `
+                        <div class="recipe-step">
+                            <div class="recipe-step-number">${number}</div>
+                            <div>${instruction}</div>
+                        </div>
+                    `;
+                }).join('')
+                : '<div class="recipe-step">No steps yet</div>';
+
+            const updatedAt = data.updated_at ? new Date(data.updated_at) : null;
+            const updatedText = updatedAt
+                ? `Updated ${updatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                : '';
+
+            cardEl.innerHTML = `
+                <div class="recipe-header">
+                    <div>
+                        <div class="recipe-title">${title}</div>
+                        <div class="recipe-subtitle">${subtitle}</div>
+                    </div>
+                    <div class="recipe-pill">${style}</div>
+                </div>
+                <div class="recipe-tags">
+                    ${tags.map(tag => `<span class="recipe-tag">${tag}</span>`).join('')}
+                </div>
+                <div>
+                    <div class="recipe-section-title">Ingredients</div>
+                    <div class="recipe-ingredients">${ingredientsHtml}</div>
+                </div>
+                <div>
+                    <div class="recipe-section-title">Steps</div>
+                    <div class="recipe-steps">${stepsHtml}</div>
+                </div>
+                <div class="recipe-updated">${updatedText}</div>
+            `;
+        }
+
         // Messages
         function addMessage(type, text, options = {}) {
             const list = document.getElementById('conversationList');
@@ -906,6 +1236,7 @@
                 tool: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 7l3 3m-7 7l-3 3m2-14l2 2-6 6-2-2 6-6zm8-1a4 4 0 0 1-5 5l-8 8-3-3 8-8a4 4 0 0 1 5-5z" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
                 light: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21h6" stroke-width="2" stroke-linecap="round"></path><path d="M10 17h4" stroke-width="2" stroke-linecap="round"></path><path d="M12 3a6 6 0 0 0-3.5 10.9c.7.5 1.2 1.3 1.4 2.1h4.2c.2-.8.7-1.6 1.4-2.1A6 6 0 0 0 12 3z" fill="none" stroke-width="2"></path></svg>',
                 timer: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8" fill="none" stroke-width="2"></circle><path d="M12 13V9" stroke-width="2" stroke-linecap="round"></path><path d="M9 2h6" stroke-width="2" stroke-linecap="round"></path></svg>',
+                recipe: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7c5-3 13-3 18 0l-9 14L3 7z" fill="none" stroke-width="2" stroke-linejoin="round"></path><circle cx="10" cy="12" r="1" fill="currentColor"></circle><circle cx="14" cy="10" r="1" fill="currentColor"></circle></svg>',
                 music: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18a2 2 0 1 1-2-2 2 2 0 0 1 2 2zm8-11v9a2 2 0 1 1-2-2 2 2 0 0 1 2 2v-7l-8 2v5a2 2 0 1 1-2-2 2 2 0 0 1 2 2V6l10-3z" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
                 check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
             };
@@ -927,6 +1258,16 @@
                 icon = iconSvg('timer');
                 const name = args.name ? ` (${args.name})` : '';
                 text = `Timer set for ${args.duration_minutes} min${name}`;
+            } else if (toolName === 'pizza_dough_recipe') {
+                icon = iconSvg('recipe');
+                const details = [];
+                if (args && args.ball_count && args.ball_weight_g) {
+                    details.push(`${args.ball_count} x ${args.ball_weight_g}g`);
+                }
+                if (args && args.hydration_percent) {
+                    details.push(`${args.hydration_percent}% hydration`);
+                }
+                text = details.length ? `Pizza dough (${details.join(', ')})` : 'Pizza dough recipe';
             } else if (toolName === 'stop_music') {
                 icon = iconSvg('music');
                 text = 'Stopped audio';
