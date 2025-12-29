@@ -504,11 +504,15 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
             # 3. Execute Tool Call or Respond
             if response.candidates and response.candidates[0].content.parts:
                 has_tool_call = False
+                suppress_auto_resume = False
+                suppress_resume_tools = {"play_youtube_music", "pause_audio", "stop_music"}
                 for part in response.candidates[0].content.parts:
                     if part.function_call:
                         has_tool_call = True
                         tool_name = part.function_call.name
                         args = dict(part.function_call.args)
+                        if tool_name in suppress_resume_tools:
+                            suppress_auto_resume = True
                         
                         print(f"✅ Action: {tool_name}")
                         emit_tool_call(self.bus, tool_name, args)
@@ -526,7 +530,8 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
                     emit_state_changed(self.bus, "executing", "speaking")
                     speak_tts("Done")
                     emit_state_changed(self.bus, "speaking", "idle")
-                    resume_media()  # Resume music if we paused it
+                    if not suppress_auto_resume:
+                        resume_media()  # Resume music if we paused it
                 elif response.text:
                     if conversation_memory and use_history:
                         conversation_memory.add("user", user_command)

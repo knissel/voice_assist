@@ -5,6 +5,25 @@ Requires ytmusicapi and authentication setup.
 import os
 import json
 from ytmusicapi import YTMusic
+from tools.audio import pause_media, clear_media_pause_state, is_media_paused_by_assistant
+
+_active_headless_process = None
+
+
+def _stop_headless_playback():
+    global _active_headless_process
+    if not _active_headless_process:
+        return
+
+    try:
+        if _active_headless_process.poll() is None:
+            _active_headless_process.terminate()
+            try:
+                _active_headless_process.wait(timeout=1.5)
+            except Exception:
+                _active_headless_process.kill()
+    finally:
+        _active_headless_process = None
 
 class YouTubeMusicManager:
     def __init__(self):
@@ -83,11 +102,17 @@ def play_youtube_music(query: str, content_type: str = "song"):
     Returns:
         Result message with playback information
     """
+    global _active_headless_process
     import subprocess
     import platform
     import shutil
     
     manager = YouTubeMusicManager()
+
+    # Stop any assistant-paused media from resuming when we start new playback.
+    if not is_media_paused_by_assistant():
+        pause_media()
+    clear_media_pause_state()
     
     type_mapping = {
         "song": "songs",
@@ -115,13 +140,14 @@ def play_youtube_music(query: str, content_type: str = "song"):
     
     try:
         if headless_mode:
+            _stop_headless_playback()
             # Headless mode: stream audio directly using mpv or yt-dlp + ffplay.
             mpv_path = shutil.which("mpv")
             ytdlp_path = shutil.which("yt-dlp")
             ffplay_path = shutil.which("ffplay")
 
             if mpv_path:
-                subprocess.Popen(
+                _active_headless_process = subprocess.Popen(
                     [mpv_path, "--no-video", "--really-quiet", url],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
@@ -158,7 +184,7 @@ def play_youtube_music(query: str, content_type: str = "song"):
                     return "Failed to get audio stream URL for headless playback."
 
                 # Play with ffplay (part of ffmpeg)
-                subprocess.Popen(
+                _active_headless_process = subprocess.Popen(
                     [ffplay_path, "-nodisp", "-autoexit", "-loglevel", "quiet", audio_url],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
@@ -199,6 +225,9 @@ def stop_music():
     stopped = []
     
     try:
+        _stop_headless_playback()
+        clear_media_pause_state()
+
         # Kill mpv (headless mode music)
         result = subprocess.run(
             ["pkill", "-9", "mpv"],
