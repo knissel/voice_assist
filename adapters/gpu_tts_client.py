@@ -248,9 +248,14 @@ class GPUTTSClient:
                     audio_output.write(audio_chunk)
                 
                 elapsed = time.time() - start
-                audio_duration = total_samples / sample_rate
-                self._gpu_calls += 1
+                audio_duration = total_samples / sample_rate if sample_rate else 0.0
                 
+                if chunk_count == 0:
+                    logger.warning("GPU TTS stream returned no audio chunks")
+                    self._gpu_failures += 1
+                    return False
+                
+                self._gpu_calls += 1
                 logger.info(f"GPU TTS stream: {len(text)} chars, {chunk_count} chunks, "
                            f"{audio_duration:.1f}s audio in {elapsed:.2f}s")
                 
