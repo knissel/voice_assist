@@ -144,6 +144,13 @@ def health():
     }), 200
 
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Log unhandled errors and return JSON for easier client debugging."""
+    logger.exception(f"Unhandled server error: {e}")
+    return jsonify({"error": str(e)}), 500
+
+
 @app.route('/synthesize', methods=['POST'])
 def synthesize():
     """
