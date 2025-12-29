@@ -7,7 +7,7 @@ from datetime import datetime
 from google.genai import types
 from tools.control4_tool import control_home_lighting
 from tools.bluetooth import connect_bluetooth_device, disconnect_bluetooth_device, get_bluetooth_status
-from tools.audio import route_to_bluetooth, set_audio_sink, get_audio_sinks, control_volume
+from tools.audio import route_to_bluetooth, set_audio_sink, get_audio_sinks, control_volume, pause_audio, resume_audio
 from tools.youtube_music import play_youtube_music, stop_music
 from tools.timer import set_timer, cancel_timer, list_timers, check_timer
 
@@ -85,7 +85,25 @@ GEMINI_TOOLS = [
             ),
             types.FunctionDeclaration(
                 name="stop_music",
-                description="Stop all audio playback including music and text-to-speech. Use when user asks to stop, pause, turn off music, or silence TTS/speech.",
+                description="Stop all audio playback including music and text-to-speech. Use when user asks to stop or turn off music/audio.",
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={},
+                    required=[]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="pause_audio",
+                description="Pause current audio or music playback. Use when user says pause, hold on, or wait.",
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={},
+                    required=[]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="resume_audio",
+                description="Resume audio or music playback after a pause. Use when user says resume, continue, or play again.",
                 parameters=types.Schema(
                     type="OBJECT",
                     properties={},
@@ -267,7 +285,31 @@ TOOL_SPECS = [
         "type": "function",
         "function": {
             "name": "stop_music",
-            "description": "Stop all audio playback including music and text-to-speech. Use when user asks to stop, pause, turn off music, or silence TTS/speech.",
+            "description": "Stop all audio playback including music and text-to-speech. Use when user asks to stop or turn off music/audio.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "pause_audio",
+            "description": "Pause current audio or music playback. Use when user says pause, hold on, or wait.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resume_audio",
+            "description": "Resume audio or music playback after a pause. Use when user says resume, continue, or play again.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -307,6 +349,8 @@ TOOL_FUNCTIONS = {
     "set_audio_sink": set_audio_sink,
     "play_youtube_music": play_youtube_music,
     "stop_music": stop_music,
+    "pause_audio": pause_audio,
+    "resume_audio": resume_audio,
     "control_volume": control_volume,
     "set_timer": set_timer,
     "cancel_timer": cancel_timer,

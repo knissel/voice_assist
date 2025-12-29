@@ -344,6 +344,18 @@ def control_volume(action: str, level: int = None):
 _media_was_playing = False
 
 
+def _signal_process(process_name: str, signal_name: str) -> bool:
+    """Send a signal to a process by name (Linux only)."""
+    try:
+        result = subprocess.run(
+            ["pkill", signal_name, process_name],
+            capture_output=True
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def pause_media():
     """
     Pause any currently playing media.
@@ -519,3 +531,40 @@ def resume_media():
 def is_media_paused_by_assistant():
     """Check if we paused media and should resume later."""
     return _media_was_playing
+
+
+def pause_audio():
+    """
+    Pause audio playback when possible.
+    Falls back to pausing headless players (mpv/ffplay) on Linux.
+    """
+    global _media_was_playing
+    if pause_media():
+        return "Paused audio playback"
+
+    if platform.system() == "Linux":
+        if _signal_process("mpv", "-STOP") or _signal_process("ffplay", "-STOP"):
+            _media_was_playing = True
+            return "Paused audio playback"
+
+    return "Nothing to pause"
+
+
+def resume_audio():
+    """
+    Resume audio playback if it was paused by pause_audio().
+    """
+    global _media_was_playing
+    if not _media_was_playing:
+        return "Nothing to resume"
+
+    if resume_media():
+        return "Resumed audio playback"
+
+    if platform.system() == "Linux":
+        if _signal_process("mpv", "-CONT") or _signal_process("ffplay", "-CONT"):
+            _media_was_playing = False
+            return "Resumed audio playback"
+
+    _media_was_playing = False
+    return "Nothing to resume"
