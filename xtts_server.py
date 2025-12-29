@@ -26,6 +26,9 @@ model = None
 speaker_wav_path = None
 gpt_cond_latent = None
 speaker_embedding = None
+DEFAULT_STREAM_CHUNK_SIZE = int(os.getenv("XTTS_STREAM_CHUNK_SIZE", "15"))
+MIN_STREAM_CHUNK_SIZE = 4
+MAX_STREAM_CHUNK_SIZE = 100
 
 
 def load_model(device: str = "cuda"):
@@ -160,6 +163,11 @@ def synthesize():
     
     text = data['text']
     language = data.get('language', 'en')
+    try:
+        stream_chunk_size = int(data.get('stream_chunk_size', DEFAULT_STREAM_CHUNK_SIZE))
+    except (TypeError, ValueError):
+        stream_chunk_size = DEFAULT_STREAM_CHUNK_SIZE
+    stream_chunk_size = max(MIN_STREAM_CHUNK_SIZE, min(stream_chunk_size, MAX_STREAM_CHUNK_SIZE))
     
     # Use default speaker if none loaded
     if speaker_embedding is None:
@@ -277,7 +285,7 @@ def synthesize_stream():
                 repetition_penalty=10.0,
                 top_k=50,
                 top_p=0.85,
-                stream_chunk_size=20,  # Smaller chunks = lower latency
+                stream_chunk_size=stream_chunk_size,
             )
             
             for chunk in chunks:
@@ -311,6 +319,7 @@ def synthesize_stream():
     response.headers['X-Sample-Rate'] = '24000'
     response.headers['X-Channels'] = '1'
     response.headers['X-Format'] = 'int16'
+    response.headers['X-Stream-Chunk-Size'] = str(stream_chunk_size)
     return response
 
 

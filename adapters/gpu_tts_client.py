@@ -22,6 +22,9 @@ class GPUTTSConfig:
     """Configuration for GPU TTS client."""
     server_url: str = "http://localhost:5001"
     timeout_seconds: float = 3.0  # Max time to wait for GPU server
+    stream_timeout_seconds: float = 30.0
+    stream_chunk_size: int = 15
+    stream_chunk_bytes: int = 2400
     fallback_enabled: bool = True
     language: str = "en"
     sample_rate: int = 24000  # XTTS outputs 24kHz
@@ -57,13 +60,20 @@ class GPUTTSClient:
         piper_voice = None,
         piper_sample_rate: int = 22050,
         timeout_seconds: float = 3.0,
+        stream_timeout_seconds: float = 30.0,
+        stream_chunk_size: int = 15,
+        stream_chunk_bytes: int = 2400,
         language: str = "en"
     ):
         self.server_url = server_url or os.getenv("XTTS_SERVER_URL", "http://localhost:5001")
         self.piper_voice = piper_voice
         self.piper_sample_rate = piper_sample_rate
         self.timeout = timeout_seconds
+        self.stream_timeout = stream_timeout_seconds
+        self.stream_chunk_size = stream_chunk_size
+        self.stream_chunk_bytes = stream_chunk_bytes
         self.language = language
+        self._session = requests.Session()
         
         self._lock = threading.Lock()
         self._server_healthy = None  # None = unknown, True/False = known state
@@ -83,8 +93,9 @@ class GPUTTSClient:
         if self._server_healthy is not None and (now - self._last_health_check) < self._health_check_interval:
             return self._server_healthy
         
+        response = None
         try:
-            response = requests.get(
+            response = self._session.get(
                 f"{self.server_url}/health",
                 timeout=1.0
             )
@@ -100,15 +111,19 @@ class GPUTTSClient:
             self._server_healthy = False
             self._last_health_check = now
             logger.warning(f"GPU TTS server unreachable: {e}")
+        finally:
+            if response is not None:
+                response.close()
         
         return self._server_healthy
     
     def _synthesize_gpu(self, text: str) -> Optional[tuple[np.ndarray, int]]:
         """Synthesize using GPU server. Returns (audio_data, sample_rate) or None."""
+        response = None
         try:
             start = time.time()
             
-            response = requests.post(
+            response = self._session.post(
                 f"{self.server_url}/synthesize",
                 json={"text": text, "language": self.language},
                 timeout=self.timeout
@@ -153,6 +168,12 @@ class GPUTTSClient:
             logger.error(f"GPU TTS unexpected error: {e}")
             self._gpu_failures += 1
             return None
+        finally:
+            try:
+                if response is not None:
+                    response.close()
+            except Exception:
+                pass
     
     def synthesize_stream(self, text: str, audio_output) -> bool:
         """
@@ -174,76 +195,87 @@ class GPUTTSClient:
             if not self._check_server_health():
                 logger.info("GPU server not healthy, falling back to non-streaming")
                 return False
-        
-        try:
-            start = time.time()
-            chunk_count = 0
-            total_samples = 0
             
-            # Use streaming endpoint with iter_content
-            response = requests.post(
-                f"{self.server_url}/synthesize_stream",
-                json={"text": text, "language": self.language},
-                timeout=self.timeout,
-                stream=True  # Enable streaming response
-            )
-            
-            if response.status_code != 200:
-                logger.warning(f"GPU TTS stream error: {response.status_code}")
+            response = None
+            try:
+                start = time.time()
+                chunk_count = 0
+                total_samples = 0
+                
+                # Use streaming endpoint with iter_content
+                response = self._session.post(
+                    f"{self.server_url}/synthesize_stream",
+                    json={
+                        "text": text,
+                        "language": self.language,
+                        "stream_chunk_size": self.stream_chunk_size
+                    },
+                    timeout=(self.timeout, self.stream_timeout),
+                    stream=True  # Enable streaming response
+                )
+                
+                if response.status_code != 200:
+                    logger.warning(f"GPU TTS stream error: {response.status_code}")
+                    self._gpu_failures += 1
+                    return False
+                
+                sample_rate = int(response.headers.get('X-Sample-Rate', 24000))
+                
+                # Buffer for accumulating chunks (for resampling)
+                # We need to resample from 24kHz to audio_output.sample_rate
+                target_rate = getattr(audio_output, 'sample_rate', sample_rate)
+                
+                # Read and play chunks as they arrive
+                # Use larger chunk size for network efficiency, smaller for low latency
+                for raw_chunk in response.iter_content(chunk_size=self.stream_chunk_bytes):
+                    if not raw_chunk:
+                        continue
+                    
+                    audio_chunk = np.frombuffer(raw_chunk, dtype=np.int16)
+                    total_samples += len(audio_chunk)
+                    chunk_count += 1
+                    
+                    # Log time-to-first-audio
+                    if chunk_count == 1:
+                        ttfa = time.time() - start
+                        logger.info(f"GPU TTS stream: first audio in {ttfa:.3f}s")
+                    
+                    # Resample if needed
+                    if target_rate != sample_rate:
+                        audio_chunk = self._resample(audio_chunk, sample_rate, target_rate)
+                    
+                    # Play immediately
+                    audio_output.write(audio_chunk)
+                
+                elapsed = time.time() - start
+                audio_duration = total_samples / sample_rate
+                self._gpu_calls += 1
+                
+                logger.info(f"GPU TTS stream: {len(text)} chars, {chunk_count} chunks, "
+                           f"{audio_duration:.1f}s audio in {elapsed:.2f}s")
+                
+                return True
+                
+            except requests.exceptions.Timeout:
+                logger.warning(f"GPU TTS stream timeout after {self.timeout}s")
                 self._gpu_failures += 1
                 return False
-            
-            sample_rate = int(response.headers.get('X-Sample-Rate', 24000))
-            
-            # Buffer for accumulating chunks (for resampling)
-            # We need to resample from 24kHz to audio_output.sample_rate
-            target_rate = getattr(audio_output, 'sample_rate', sample_rate)
-            
-            # Read and play chunks as they arrive
-            # Use larger chunk size for network efficiency, smaller for low latency
-            for raw_chunk in response.iter_content(chunk_size=4800):  # ~100ms at 24kHz int16
-                if not raw_chunk:
-                    continue
-                
-                audio_chunk = np.frombuffer(raw_chunk, dtype=np.int16)
-                total_samples += len(audio_chunk)
-                chunk_count += 1
-                
-                # Log time-to-first-audio
-                if chunk_count == 1:
-                    ttfa = time.time() - start
-                    logger.info(f"GPU TTS stream: first audio in {ttfa:.3f}s")
-                
-                # Resample if needed
-                if target_rate != sample_rate:
-                    audio_chunk = self._resample(audio_chunk, sample_rate, target_rate)
-                
-                # Play immediately
-                audio_output.write(audio_chunk)
-            
-            elapsed = time.time() - start
-            audio_duration = total_samples / sample_rate
-            self._gpu_calls += 1
-            
-            logger.info(f"GPU TTS stream: {len(text)} chars, {chunk_count} chunks, "
-                       f"{audio_duration:.1f}s audio in {elapsed:.2f}s")
-            
-            return True
-            
-        except requests.exceptions.Timeout:
-            logger.warning(f"GPU TTS stream timeout after {self.timeout}s")
-            self._gpu_failures += 1
-            return False
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"GPU TTS stream request failed: {e}")
-            self._gpu_failures += 1
-            self._server_healthy = False
-            self._last_health_check = time.time()
-            return False
-        except Exception as e:
-            logger.error(f"GPU TTS stream unexpected error: {e}")
-            self._gpu_failures += 1
-            return False
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"GPU TTS stream request failed: {e}")
+                self._gpu_failures += 1
+                self._server_healthy = False
+                self._last_health_check = time.time()
+                return False
+            except Exception as e:
+                logger.error(f"GPU TTS stream unexpected error: {e}")
+                self._gpu_failures += 1
+                return False
+            finally:
+                try:
+                    if response is not None:
+                        response.close()
+                except Exception:
+                    pass
     
     def _synthesize_piper(self, text: str) -> Optional[tuple[np.ndarray, int]]:
         """Synthesize using local Piper. Returns (audio_data, sample_rate) or None."""
@@ -383,4 +415,12 @@ class GPUTTSClient:
     def force_health_check(self) -> bool:
         """Force a health check of the GPU server."""
         self._last_health_check = 0  # Reset cache
-        return self._check_server_health()
+        with self._lock:
+            return self._check_server_health()
+
+    def close(self) -> None:
+        """Close the underlying HTTP session."""
+        try:
+            self._session.close()
+        except Exception:
+            pass

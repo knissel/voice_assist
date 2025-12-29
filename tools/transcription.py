@@ -37,6 +37,7 @@ class TranscriptionService:
         self.remote_available = False
         self._last_health_check = 0.0
         self._health_check_interval = health_check_interval
+        self._session = requests.Session() if remote_url else None
         
         # Check remote server availability
         if self.remote_url:
@@ -52,8 +53,14 @@ class TranscriptionService:
             if (now - self._last_health_check) < self._health_check_interval:
                 return self.remote_available
         
+        if self._session is None:
+            self.remote_available = False
+            self._last_health_check = now
+            return False
+
+        response = None
         try:
-            response = requests.get(
+            response = self._session.get(
                 f"{self.remote_url}/health",
                 timeout=self.timeout
             )
@@ -67,13 +74,21 @@ class TranscriptionService:
             self._last_health_check = now
             logger.debug(f"Remote server unavailable: {e}")
             return False
+        finally:
+            if response is not None:
+                response.close()
     
     def _transcribe_remote(self, audio_path: str) -> Optional[str]:
         """Transcribe using remote GPU server."""
+        if self._session is None:
+            self.remote_available = False
+            return None
+
+        response = None
         try:
             with open(audio_path, 'rb') as f:
                 files = {'audio': f}
-                response = requests.post(
+                response = self._session.post(
                     f"{self.remote_url}/transcribe",
                     files=files,
                     timeout=30  # Longer timeout for transcription
@@ -93,7 +108,20 @@ class TranscriptionService:
             logger.warning(f"Remote transcription error: {e}")
             self.remote_available = False
             return None
+        finally:
+            if response is not None:
+                response.close()
     
+    def close(self) -> None:
+        """Close the underlying HTTP session."""
+        if self._session is None:
+            return
+        try:
+            self._session.close()
+        except Exception:
+            pass
+        self._session = None
+
     def _transcribe_local(self, audio_path: str) -> Optional[str]:
         """Transcribe using local whisper.cpp."""
         if not self.local_whisper_path or not self.local_model_path:

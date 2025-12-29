@@ -163,6 +163,9 @@ if piper_voice:
 # Initialize GPU TTS client with Piper fallback
 XTTS_SERVER_URL = os.getenv("XTTS_SERVER_URL", "http://localhost:5001")
 USE_GPU_TTS = os.getenv("USE_GPU_TTS", "true").lower() == "true"
+XTTS_STREAM_TIMEOUT = float(os.getenv("XTTS_STREAM_TIMEOUT", "30"))
+XTTS_STREAM_CHUNK_SIZE = int(os.getenv("XTTS_STREAM_CHUNK_SIZE", "15"))
+XTTS_STREAM_READ_CHUNK_BYTES = int(os.getenv("XTTS_STREAM_READ_CHUNK_BYTES", "2400"))
 
 gpu_tts_client = None
 if USE_GPU_TTS:
@@ -170,7 +173,10 @@ if USE_GPU_TTS:
         server_url=XTTS_SERVER_URL,
         piper_voice=piper_voice,
         piper_sample_rate=piper_voice.config.sample_rate if piper_voice else 22050,
-        timeout_seconds=3.0
+        timeout_seconds=3.0,
+        stream_timeout_seconds=XTTS_STREAM_TIMEOUT,
+        stream_chunk_size=XTTS_STREAM_CHUNK_SIZE,
+        stream_chunk_bytes=XTTS_STREAM_READ_CHUNK_BYTES
     )
     print(f"🔊 GPU TTS enabled: {XTTS_SERVER_URL}")
 else:

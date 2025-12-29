@@ -34,6 +34,17 @@ except Exception:
 
 load_dotenv()
 
+def _get_env_float(name: str, default: float) -> float:
+    """Parse a float env var with a safe fallback."""
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        print(f"Invalid {name}={value!r}; using default {default}")
+        return default
+
 # === Global Event Bus ===
 # UI clients can subscribe to receive real-time updates
 event_bus = EventBus()
@@ -269,6 +280,9 @@ if piper_voice:
 # Initialize GPU TTS client with Piper fallback
 XTTS_SERVER_URL = os.getenv("XTTS_SERVER_URL", "http://localhost:5001")
 USE_GPU_TTS = os.getenv("USE_GPU_TTS", "true").lower() == "true"
+XTTS_STREAM_TIMEOUT = float(os.getenv("XTTS_STREAM_TIMEOUT", "30"))
+XTTS_STREAM_CHUNK_SIZE = int(os.getenv("XTTS_STREAM_CHUNK_SIZE", "15"))
+XTTS_STREAM_READ_CHUNK_BYTES = int(os.getenv("XTTS_STREAM_READ_CHUNK_BYTES", "2400"))
 
 gpu_tts_client = None
 if USE_GPU_TTS:
@@ -276,7 +290,10 @@ if USE_GPU_TTS:
         server_url=XTTS_SERVER_URL,
         piper_voice=piper_voice,
         piper_sample_rate=piper_voice.config.sample_rate if piper_voice else 22050,
-        timeout_seconds=3.0
+        timeout_seconds=3.0,
+        stream_timeout_seconds=XTTS_STREAM_TIMEOUT,
+        stream_chunk_size=XTTS_STREAM_CHUNK_SIZE,
+        stream_chunk_bytes=XTTS_STREAM_READ_CHUNK_BYTES
     )
     print(f"🔊 GPU TTS enabled: {XTTS_SERVER_URL}")
 else:
@@ -492,9 +509,9 @@ def capture_audio_only():
 
     CHUNK = 1024
     RATE = 16000
-    MAX_RECORD_SECONDS = 15      # Extended max recording time
-    GRACE_PERIOD_SECONDS = 1.5   # Wait this long before checking for silence
-    SILENCE_DURATION = 1.5       # Require 1.5s of silence to stop (reduced from 2.0s for faster response)
+    MAX_RECORD_SECONDS = _get_env_float("WAKEWORD_MAX_RECORD_SECONDS", 15.0)
+    GRACE_PERIOD_SECONDS = _get_env_float("WAKEWORD_GRACE_SECONDS", 0.8)
+    SILENCE_DURATION = _get_env_float("WAKEWORD_SILENCE_SECONDS", 0.8)
     VAD_NORMALIZE = 1.0 / 32768.0  # Pre-computed normalization factor
     
     frames = []
