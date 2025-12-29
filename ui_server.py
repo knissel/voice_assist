@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple WebSocket server for the Jarvis UI.
+Simple WebSocket server for the Computer UI.
 Serves the touch-friendly UI and bridges events from the assistant.
 
 Usage:
@@ -147,7 +147,7 @@ def setup_event_bridge():
 def main():
     """Main entry point."""
     print("=" * 50)
-    print("🤖 Jarvis UI Server")
+    print("🤖 Computer UI Server")
     print("=" * 50)
     
     # Check if UI files exist

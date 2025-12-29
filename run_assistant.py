@@ -349,7 +349,7 @@ def llm_respond_or_tool_call(user_text):
     
     if needs_search and not needs_tools:
         # Use Google Search for real-time info
-        system_instruction = f"""You are Jarvis, a helpful voice assistant. {location_context}
+        system_instruction = f"""You are Computer, a helpful voice assistant. {location_context}
 
 IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for natural speech:
 - Say "high of 58" not "58°F" or "58 degrees F"
@@ -369,7 +369,7 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
         )
     else:
         # Use function calling for smart home and general questions
-        system_instruction = f"""You are Jarvis, a helpful voice assistant. {location_context}
+        system_instruction = f"""You are Computer, a helpful voice assistant. {location_context}
 
 For lighting commands, IMMEDIATELY call control_home_lighting function with NO explanation.
 Device IDs: Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89.

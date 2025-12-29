@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Jarvis Assistant</title>
+    <title>Computer Assistant</title>
     <!-- Optimized for Pi: Use system fonts with Inter-like fallback stack (no external requests) -->
     <style>
         * {
@@ -639,8 +639,8 @@
         <!-- Header -->
         <header class="header">
             <div class="logo">
-                <div class="logo-icon">🤖</div>
-                <span class="logo-text">Jarvis</span>
+                <div class="logo-icon">AI</div>
+                <span class="logo-text">Computer</span>
             </div>
             <div class="status-badge">
                 <div class="status-dot" id="statusDot"></div>
@@ -655,7 +655,7 @@
                 <h2 class="panel-title">Conversation</h2>
                 <div class="conversation-list" id="conversationList">
                     <div class="message assistant">
-                        <div class="message-text">Hello! I'm Jarvis. Say "Computer" or "Americano" to wake me up.</div>
+                        <div class="message-text">Hello! I'm Computer. Say "Computer" to wake me up.</div>
                     </div>
                 </div>
             </section>
@@ -810,7 +810,7 @@
                     handleStateChange(event.data);
                     break;
                 case 'wakeword_detected':
-                    addMessage('system', '🔔 Wake word detected');
+                    addMessage('system', 'WAKE: Wake word detected');
                     break;
                 case 'transcript_final':
                     addMessage('user', event.data.text);
@@ -841,7 +841,7 @@
                     removeTimer(event.data.id);
                     break;
                 case 'error':
-                    addMessage('assistant', `⚠️ ${event.data.message}`);
+                    addMessage('assistant', `WARN: ${event.data.message}`);
                     break;
             }
         }
@@ -921,7 +921,7 @@
                 if (args.device_id === 999) {
                     text = args.brightness === 0 ? 'All lights off' : 'All lights on';
                 } else {
-                    text = `Light ${args.device_id} → ${args.brightness}%`;
+                    text = `Light ${args.device_id} -> ${args.brightness}%`;
                 }
             } else if (toolName === 'set_timer' && args) {
                 icon = iconSvg('timer');
@@ -935,11 +935,11 @@
             }
 
             if (resultText) {
-                text = `${text} — ${resultText}`;
+                text = `${text} - ${resultText}`;
             }
 
             if (isError) {
-                text = `⚠️ ${text}`;
+                text = `WARN: ${text}`;
             }
 
             return `<span class="inline-icon">${icon}</span>${text}`;
@@ -974,7 +974,7 @@
             renderTimers();
             
             // Show notification
-            addMessage('assistant', `⏰ Timer "${data.name}" is complete!`);
+            addMessage('assistant', `TIMER: "${data.name}" is complete!`);
             
             // Remove after 5 seconds
             setTimeout(() => removeTimer(data.id), 5000);
@@ -1025,7 +1025,7 @@
                                 <div class="timer-progress-bar" style="width: ${progress}%"></div>
                             </div>
                         </div>
-                        <button class="timer-cancel" onclick="cancelTimer('${id}')">✕</button>
+                        <button class="timer-cancel" onclick="cancelTimer('${id}')">x</button>
                     </div>
                 `;
             }).join('');

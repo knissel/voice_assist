@@ -393,7 +393,7 @@ class AssistantWorker:
             
             if needs_search and not needs_tools:
                 # Use Google Search for real-time info
-                system_instruction = f"""You are Jarvis, a helpful voice assistant. {location_context}
+                system_instruction = f"""You are Computer, a helpful voice assistant. {location_context}
 
 IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for natural speech:
 - Say "high of 58" not "58°F" or "58 degrees F"
@@ -413,7 +413,7 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
                 )
             else:
                 # Use function calling for smart home and general questions
-                system_instruction = f"""You are Jarvis, a helpful voice assistant. {location_context}
+                system_instruction = f"""You are Computer, a helpful voice assistant. {location_context}
 
 For lighting commands, IMMEDIATELY call control_home_lighting function with NO explanation.
 Device IDs: Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89.
@@ -459,7 +459,7 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
                     emit_state_changed(self.bus, "speaking", "idle")
                     resume_media()  # Resume music if we paused it
                 elif response.text:
-                    print(f"💬 Jarvis: {response.text}")
+                    print(f"💬 Computer: {response.text}")
                     emit_assistant_text(self.bus, response.text)
                     emit_state_changed(self.bus, "thinking", "speaking")
                     speak_tts(response.text)
@@ -488,7 +488,7 @@ def capture_audio_only():
     - Pre-allocated tensor buffer to avoid allocations in hot loop
     - Grace period before checking silence (time to collect thoughts)
     """
-    print("🎤 Jarvis is listening...")
+    print("🎤 Computer is listening...")
 
     CHUNK = 1024
     RATE = 16000
@@ -597,7 +597,7 @@ def capture_audio_only():
         return None
 
     # Save to temp file with unique timestamp
-    temp_audio_path = f"/tmp/jarvis_command_{int(time.time())}.wav"
+    temp_audio_path = f"/tmp/computer_command_{int(time.time())}.wav"
     with wave.open(temp_audio_path, 'wb') as wf:
         wf.setnchannels(1)
         wf.setsampwidth(pa.get_sample_size(pyaudio.paInt16))
@@ -681,12 +681,12 @@ def play_audio(audio_path: str) -> None:
     print("⚠️  No audio player found. Install ffmpeg or use a system with audio support.")
 
 # 1. Setup the Engine
-# 'keywords' can be standard ones like ['jarvis', 'computer']
+# 'keywords' can be standard ones like ['computer']
 # or a path to your custom 'Gemini.ppn' file.
 access_key = os.getenv("PORCUPINE_ACCESS_KEY")
 porcupine = pvporcupine.create(
     access_key=access_key,
-    keywords=['americano', 'computer'] 
+    keywords=['computer']
 )
 
 # 2. Setup the Microphone Stream

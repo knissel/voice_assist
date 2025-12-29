@@ -181,7 +181,7 @@ python run_assistant.py
 - "Pause"
 
 ### General Questions
-Ask any question and Jarvis will respond with concise answers.
+Ask any question and Computer will respond with concise answers.
 
 ## Project Structure
 
