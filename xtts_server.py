@@ -254,6 +254,11 @@ def synthesize_stream():
     
     text = data['text']
     language = data.get('language', 'en')
+    try:
+        stream_chunk_size = int(data.get('stream_chunk_size', DEFAULT_STREAM_CHUNK_SIZE))
+    except (TypeError, ValueError):
+        stream_chunk_size = DEFAULT_STREAM_CHUNK_SIZE
+    stream_chunk_size = max(MIN_STREAM_CHUNK_SIZE, min(stream_chunk_size, MAX_STREAM_CHUNK_SIZE))
     
     # Use default speaker if none loaded
     if speaker_embedding is None:
