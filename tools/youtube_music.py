@@ -85,6 +85,7 @@ def play_youtube_music(query: str, content_type: str = "song"):
     """
     import subprocess
     import platform
+    import shutil
     
     manager = YouTubeMusicManager()
     
@@ -114,40 +115,59 @@ def play_youtube_music(query: str, content_type: str = "song"):
     
     try:
         if headless_mode:
-            # Headless mode: stream audio directly using mpv or yt-dlp
-            # Try mpv first (best option for streaming)
-            try:
+            # Headless mode: stream audio directly using mpv or yt-dlp + ffplay.
+            mpv_path = shutil.which("mpv")
+            ytdlp_path = shutil.which("yt-dlp")
+            ffplay_path = shutil.which("ffplay")
+
+            if mpv_path:
                 subprocess.Popen(
-                    ["mpv", "--no-video", "--really-quiet", url],
+                    [mpv_path, "--no-video", "--really-quiet", url],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
                 if content_type == "playlist":
                     return f"Playing playlist: {result.get('title', query)}"
-                else:
-                    return f"Now playing: {result.get('title', 'Unknown')} by {result.get('artist', 'Unknown')}"
-            except FileNotFoundError:
-                # Fallback to yt-dlp + ffplay
-                try:
-                    # Use yt-dlp to get direct audio stream URL
-                    audio_url = subprocess.check_output(
-                        ["yt-dlp", "-f", "bestaudio", "-g", url],
-                        stderr=subprocess.DEVNULL,
-                        text=True
-                    ).strip()
-                    
-                    # Play with ffplay (part of ffmpeg)
-                    subprocess.Popen(
-                        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", audio_url],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL
-                    )
-                    if content_type == "playlist":
-                        return f"Playing playlist: {result.get('title', query)}"
-                    else:
-                        return f"Now playing: {result.get('title', 'Unknown')} by {result.get('artist', 'Unknown')}"
-                except (FileNotFoundError, subprocess.CalledProcessError):
-                    return "Headless playback requires mpv or ffmpeg. Install with: sudo apt-get install mpv"
+                return f"Now playing: {result.get('title', 'Unknown')} by {result.get('artist', 'Unknown')}"
+
+            if not ytdlp_path:
+                return "Headless playback requires mpv or yt-dlp+ffplay. Install with: sudo apt-get install mpv"
+
+            if not ffplay_path:
+                return "Headless playback requires ffplay (ffmpeg). Install with: sudo apt-get install ffmpeg"
+
+            # Fallback to yt-dlp + ffplay
+            try:
+                ytdlp_args = [ytdlp_path, "-f", "bestaudio", "-g"]
+                if content_type == "playlist":
+                    ytdlp_args += ["--playlist-items", "1"]
+                ytdlp_args.append(url)
+
+                # Use yt-dlp to get direct audio stream URL
+                audio_output = subprocess.check_output(
+                    ytdlp_args,
+                    stderr=subprocess.DEVNULL,
+                    text=True
+                )
+                audio_url = ""
+                for line in audio_output.splitlines():
+                    if line.strip():
+                        audio_url = line.strip()
+                        break
+                if not audio_url:
+                    return "Failed to get audio stream URL for headless playback."
+
+                # Play with ffplay (part of ffmpeg)
+                subprocess.Popen(
+                    [ffplay_path, "-nodisp", "-autoexit", "-loglevel", "quiet", audio_url],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                if content_type == "playlist":
+                    return f"Playing first track from playlist: {result.get('title', query)} (install mpv for full playlist)"
+                return f"Now playing: {result.get('title', 'Unknown')} by {result.get('artist', 'Unknown')}"
+            except subprocess.CalledProcessError:
+                return "Headless playback failed to resolve stream URL. Try installing mpv."
         else:
             # Browser mode: open in default browser
             system = platform.system()

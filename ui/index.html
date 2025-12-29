@@ -37,6 +37,36 @@
             touch-action: manipulation;
         }
 
+        /* Scrollbars */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: var(--accent-blue) var(--bg-secondary);
+        }
+
+        *::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        *::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+            border-radius: 999px;
+        }
+
+        *::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #2f3b66, #3b82f6);
+            border-radius: 999px;
+            border: 2px solid var(--bg-secondary);
+        }
+
+        *::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, #3c4a7a, #60a5fa);
+        }
+
+        *::-webkit-scrollbar-corner {
+            background: var(--bg-secondary);
+        }
+
         .container {
             display: grid;
             grid-template-rows: auto 1fr auto;
@@ -148,17 +178,25 @@
         /* Main Content */
         .main-content {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
             gap: 16px;
             overflow: hidden;
         }
 
+        body.tool-focus .main-content {
+            grid-template-columns: minmax(0, 1.7fr) minmax(0, 0.85fr);
+        }
+
         .side-panel {
             display: grid;
-            grid-template-rows: minmax(0, 1.15fr) minmax(0, 0.85fr);
+            grid-template-rows: minmax(0, 1fr) minmax(0, 0.65fr);
             gap: 16px;
             overflow: hidden;
             min-height: 0;
+        }
+
+        .side-panel.compact-timers {
+            grid-template-rows: minmax(0, 1fr) auto;
         }
 
         /* Conversation Panel */
@@ -178,7 +216,52 @@
             color: var(--text-secondary);
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            margin: 0;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
             margin-bottom: 16px;
+        }
+
+        .panel-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-meta {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .panel-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            padding: 6px 12px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s, border-color 0.2s;
+        }
+
+        .panel-btn:active {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border-color: var(--accent-blue);
         }
 
         .conversation-list {
@@ -358,6 +441,38 @@
             opacity: 0.5;
         }
 
+        .no-timers-title {
+            font-size: 13px;
+        }
+
+        .no-timers-hint {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .timers-panel.is-empty {
+            padding-bottom: 12px;
+        }
+
+        .timers-panel.is-empty .timers-list {
+            flex: 0;
+        }
+
+        .timers-panel.is-empty .no-timers {
+            flex-direction: row;
+            justify-content: flex-start;
+            text-align: left;
+            gap: 10px;
+        }
+
+        .timers-panel.is-empty .no-timers-icon {
+            font-size: 28px;
+        }
+
+        .timers-panel.is-empty .no-timers-hint {
+            display: none;
+        }
+
         /* Recipe Panel */
         .recipe-panel {
             background: var(--bg-secondary);
@@ -494,6 +609,11 @@
         .no-recipe-icon {
             font-size: 48px;
             opacity: 0.5;
+        }
+
+        .no-recipe-hint {
+            font-size: 12px;
+            color: var(--text-secondary);
         }
 
         /* Quick Actions */
@@ -733,9 +853,21 @@
                 font-size: 18px;
             }
 
+            .panel-header {
+                margin-bottom: 8px;
+            }
+
             .panel-title {
                 font-size: 12px;
-                margin-bottom: 8px;
+            }
+
+            .panel-btn {
+                padding: 4px 10px;
+                font-size: 10px;
+            }
+
+            .panel-meta {
+                font-size: 10px;
             }
 
             .conversation-panel, .timers-panel {
@@ -805,18 +937,22 @@
             }
         }
 
-        @media (max-width: 900px) {
+        @media (max-width: 760px) {
             .container {
                 padding: 12px;
             }
 
             .main-content {
                 grid-template-columns: 1fr;
-                grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+                grid-template-rows: minmax(0, 1.2fr) minmax(0, 0.8fr);
+            }
+
+            body.tool-focus .main-content {
+                grid-template-columns: 1fr;
             }
 
             .side-panel {
-                grid-template-rows: minmax(0, 1.1fr) minmax(0, 0.9fr);
+                grid-template-rows: minmax(0, 1fr) minmax(0, 0.6fr);
             }
 
             .quick-actions {
@@ -841,20 +977,53 @@
 
         <!-- Main Content -->
         <main class="main-content">
-            <!-- Conversation Panel -->
-            <section class="conversation-panel">
-                <h2 class="panel-title">Conversation</h2>
-                <div class="conversation-list" id="conversationList">
-                    <div class="message assistant">
-                        <div class="message-text">Hello! I'm Computer. Say "Computer" to wake me up.</div>
+            <!-- Tool Panel -->
+            <section class="recipe-panel tool-panel" id="toolPanel">
+                <div class="panel-header">
+                    <h2 class="panel-title">Active Tool</h2>
+                    <div class="panel-actions">
+                        <span class="panel-meta" id="toolMeta">Waiting for tool</span>
+                    </div>
+                </div>
+                <div class="recipe-card" id="recipeCard">
+                    <div class="no-recipe">
+                        <div class="no-recipe-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M3 7c5-3 13-3 18 0l-9 14L3 7z" fill="none" stroke-width="2" stroke-linejoin="round"></path>
+                                <circle cx="10" cy="12" r="1" fill="currentColor"></circle>
+                                <circle cx="14" cy="10" r="1" fill="currentColor"></circle>
+                            </svg>
+                        </div>
+                        <div>No tool active</div>
+                        <div class="no-recipe-hint">Ask for a recipe or command</div>
                     </div>
                 </div>
             </section>
 
-            <div class="side-panel">
+            <div class="side-panel compact-timers">
+                <!-- Conversation Panel -->
+                <section class="conversation-panel">
+                    <div class="panel-header">
+                        <h2 class="panel-title">Conversation</h2>
+                        <div class="panel-actions">
+                            <button class="panel-btn" type="button" onclick="clearConversation()">Clear</button>
+                        </div>
+                    </div>
+                    <div class="conversation-list" id="conversationList">
+                        <div class="message assistant">
+                            <div class="message-text">Hello! I'm Computer. Say "Computer" to wake me up.</div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Timers Panel -->
-                <section class="timers-panel">
-                    <h2 class="panel-title">Timers</h2>
+                <section class="timers-panel is-empty" id="timersPanel">
+                    <div class="panel-header">
+                        <h2 class="panel-title">Timers</h2>
+                        <div class="panel-actions">
+                            <span class="panel-meta" id="timersCount">None</span>
+                        </div>
+                    </div>
                     <div class="timers-list" id="timersList">
                         <div class="no-timers">
                             <div class="no-timers-icon" aria-hidden="true">
@@ -864,26 +1033,8 @@
                                     <path d="M9 2h6" stroke-width="2" stroke-linecap="round"></path>
                                 </svg>
                             </div>
-                            <div>No active timers</div>
-                            <div style="font-size: 12px;">Say "Set a timer for 5 minutes"</div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Recipe Panel -->
-                <section class="recipe-panel">
-                    <h2 class="panel-title">Recipe</h2>
-                    <div class="recipe-card" id="recipeCard">
-                        <div class="no-recipe">
-                            <div class="no-recipe-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24">
-                                    <path d="M3 7c5-3 13-3 18 0l-9 14L3 7z" fill="none" stroke-width="2" stroke-linejoin="round"></path>
-                                    <circle cx="10" cy="12" r="1" fill="currentColor"></circle>
-                                    <circle cx="14" cy="10" r="1" fill="currentColor"></circle>
-                                </svg>
-                            </div>
-                            <div>No recipe yet</div>
-                            <div style="font-size: 12px;">Ask for a pizza dough recipe</div>
+                            <div class="no-timers-title">No active timers</div>
+                            <div class="no-timers-hint">Say "Set a timer for 5 minutes"</div>
                         </div>
                     </div>
                 </section>
@@ -973,6 +1124,10 @@
         let timers = {};
         let currentState = 'idle';
         let currentRecipe = null;
+        const toolMetaEl = document.getElementById('toolMeta');
+        const timersPanelEl = document.getElementById('timersPanel');
+        const timersCountEl = document.getElementById('timersCount');
+        const sidePanelEl = document.querySelector('.side-panel');
 
         // Connect to WebSocket
         function connect() {
@@ -1133,8 +1288,24 @@
 
         function renderRecipe() {
             const cardEl = document.getElementById('recipeCard');
-            if (!cardEl || !currentRecipe) {
+            if (!cardEl) {
                 return;
+            }
+
+            if (!currentRecipe) {
+                document.body.classList.remove('tool-focus');
+                if (toolMetaEl) {
+                    toolMetaEl.textContent = 'Waiting for tool';
+                }
+                return;
+            }
+
+            document.body.classList.add('tool-focus');
+            if (toolMetaEl) {
+                const toolLabel = currentRecipe.card_type
+                    ? currentRecipe.card_type.replace(/_/g, ' ')
+                    : 'Recipe';
+                toolMetaEl.textContent = toolLabel;
             }
 
             const data = currentRecipe.data || {};
@@ -1291,6 +1462,15 @@
             addMessage('tool', html, { html: true });
         }
 
+        function clearConversation() {
+            const list = document.getElementById('conversationList');
+            if (!list) {
+                return;
+            }
+            list.innerHTML = '';
+            addMessage('assistant', 'Conversation cleared. Say "Computer" to wake me up.');
+        }
+
         // Timers
         function addTimer(data) {
             timers[data.id] = {
@@ -1329,6 +1509,7 @@
         function renderTimers() {
             const list = document.getElementById('timersList');
             const timerIds = Object.keys(timers);
+            const timerCount = timerIds.length;
             const emptyIcon = `
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                     <circle cx="12" cy="13" r="8" fill="none" stroke-width="2"></circle>
@@ -1337,12 +1518,25 @@
                 </svg>
             `;
 
-            if (timerIds.length === 0) {
+            if (timersCountEl) {
+                const label = timerCount === 1 ? '1 active' : `${timerCount} active`;
+                timersCountEl.textContent = timerCount ? label : 'None';
+            }
+
+            if (timersPanelEl) {
+                timersPanelEl.classList.toggle('is-empty', timerCount === 0);
+            }
+
+            if (sidePanelEl) {
+                sidePanelEl.classList.toggle('compact-timers', timerCount === 0);
+            }
+
+            if (timerCount === 0) {
                 list.innerHTML = `
                     <div class="no-timers">
                         <div class="no-timers-icon">${emptyIcon}</div>
-                        <div>No active timers</div>
-                        <div style="font-size: 12px;">Say "Set a timer for 5 minutes"</div>
+                        <div class="no-timers-title">No active timers</div>
+                        <div class="no-timers-hint">Say "Set a timer for 5 minutes"</div>
                     </div>
                 `;
                 return;
