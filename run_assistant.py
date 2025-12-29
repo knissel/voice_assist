@@ -20,6 +20,7 @@ from piper.voice import PiperVoice
 from tools.registry import GEMINI_TOOLS, dispatch_tool
 from tools.transcription import create_transcription_service
 from core.tts_preprocessing import preprocess_for_tts
+from core.conversation import ConversationMemory, parse_clear_phrases, should_clear_history
 from adapters.gpu_tts_client import GPUTTSClient
 from dotenv import load_dotenv
 
@@ -37,6 +38,39 @@ RECORD_SECONDS = 4
 RATE = int(os.getenv("MIC_RATE", "16000"))
 CHUNK = 1024
 MIC_DEVICE_INDEX = os.getenv("MIC_DEVICE_INDEX")
+
+def _get_env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        print(f"Invalid {name}={value!r}; using default {default}")
+        return default
+
+def _get_env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        print(f"Invalid {name}={value!r}; using default {default}")
+        return default
+
+CONVERSATION_ENABLED = os.getenv("CONVERSATION_ENABLED", "true").lower() == "true"
+CONVERSATION_MAX_TURNS = _get_env_int("CONVERSATION_MAX_TURNS", 6)
+CONVERSATION_TTL_SECONDS = _get_env_float("CONVERSATION_TTL_SECONDS", 600.0)
+CONVERSATION_CLEAR_PHRASES = parse_clear_phrases(os.getenv("CONVERSATION_CLEAR_PHRASES"))
+CONVERSATION_RESET_ON_TOOL_CALL = (
+    os.getenv("CONVERSATION_RESET_ON_TOOL_CALL", "true").lower() == "true"
+)
+conversation_memory = (
+    ConversationMemory(CONVERSATION_MAX_TURNS, CONVERSATION_TTL_SECONDS)
+    if CONVERSATION_ENABLED
+    else None
+)
 
 def _parse_mic_device_index(value: Optional[str]) -> Optional[int]:
     if not value:
@@ -334,6 +368,23 @@ def transcribe(audio_path):
     print("🎧 Transcribing...")
     return transcription_service.transcribe(audio_path)
 
+def _build_llm_contents(user_text: str, use_history: bool):
+    if not use_history or not conversation_memory:
+        return user_text
+    history = conversation_memory.get_messages()
+    if not history:
+        return user_text
+    contents = []
+    for message in history:
+        contents.append(
+            types.Content(
+                role=message["role"],
+                parts=[types.Part(text=message["text"])]
+            )
+        )
+    contents.append(types.Content(role="user", parts=[types.Part(text=user_text)]))
+    return contents
+
 def llm_respond_or_tool_call(user_text):
     """Send to LLM, handle tool calls or text response."""
     print(f"🧠 Processing: {user_text}")
@@ -350,6 +401,14 @@ def llm_respond_or_tool_call(user_text):
                    'bluetooth', 'connect', 'disconnect', 'volume', 'music', 'play', 'stop']
     needs_tools = any(kw in user_text.lower() for kw in home_keywords)
     
+    if conversation_memory:
+        conversation_memory.maybe_expire()
+        if should_clear_history(user_text, CONVERSATION_CLEAR_PHRASES):
+            conversation_memory.reset()
+
+    use_history = conversation_memory is not None and not needs_tools
+    contents = _build_llm_contents(user_text, use_history)
+
     # Location context
     location_context = "User is located in Charlotte, NC (zip code 28211)."
     
@@ -366,7 +425,7 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
         
         response = client.models.generate_content(
             model=MODEL_NAME,
-            contents=user_text,
+            contents=contents,
             config=types.GenerateContentConfig(
                 tools=[google_search_tool],
                 system_instruction=system_instruction,
@@ -388,7 +447,7 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
         
         response = client.models.generate_content(
             model=MODEL_NAME,
-            contents=user_text,
+            contents=contents,
             config=types.GenerateContentConfig(
                 tools=GEMINI_TOOLS,
                 system_instruction=system_instruction,
@@ -397,13 +456,20 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
         )
     
     if response.candidates and response.candidates[0].content.parts:
+        has_tool_call = False
         for part in response.candidates[0].content.parts:
             if part.function_call:
+                has_tool_call = True
                 args = dict(part.function_call.args)
                 result = dispatch_tool(part.function_call.name, args)
-        if any(part.function_call for part in response.candidates[0].content.parts):
+        if has_tool_call:
+            if conversation_memory and CONVERSATION_RESET_ON_TOOL_CALL:
+                conversation_memory.reset()
             return "Done"
         elif response.text:
+            if conversation_memory and use_history:
+                conversation_memory.add("user", user_text)
+                conversation_memory.add("model", response.text)
             return response.text
     return ""
 

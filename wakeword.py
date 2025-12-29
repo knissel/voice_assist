@@ -20,6 +20,7 @@ from tools.registry import GEMINI_TOOLS, dispatch_tool
 from tools.transcription import create_transcription_service
 from tools.audio import pause_media, resume_media
 from core.tts_preprocessing import preprocess_for_tts
+from core.conversation import ConversationMemory, parse_clear_phrases, should_clear_history
 from adapters.gpu_tts_client import GPUTTSClient
 from core.event_bus import (
     EventBus, emit_state_changed, emit_transcript, 
@@ -44,6 +45,29 @@ def _get_env_float(name: str, default: float) -> float:
     except ValueError:
         print(f"Invalid {name}={value!r}; using default {default}")
         return default
+
+def _get_env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        print(f"Invalid {name}={value!r}; using default {default}")
+        return default
+
+CONVERSATION_ENABLED = os.getenv("CONVERSATION_ENABLED", "true").lower() == "true"
+CONVERSATION_MAX_TURNS = _get_env_int("CONVERSATION_MAX_TURNS", 6)
+CONVERSATION_TTL_SECONDS = _get_env_float("CONVERSATION_TTL_SECONDS", 600.0)
+CONVERSATION_CLEAR_PHRASES = parse_clear_phrases(os.getenv("CONVERSATION_CLEAR_PHRASES"))
+CONVERSATION_RESET_ON_TOOL_CALL = (
+    os.getenv("CONVERSATION_RESET_ON_TOOL_CALL", "true").lower() == "true"
+)
+conversation_memory = (
+    ConversationMemory(CONVERSATION_MAX_TURNS, CONVERSATION_TTL_SECONDS)
+    if CONVERSATION_ENABLED
+    else None
+)
 
 # === Global Event Bus ===
 # UI clients can subscribe to receive real-time updates
@@ -155,6 +179,23 @@ torch.set_grad_enabled(False)  # Disable autograd (not needed for inference)
 
 # Initialize transcription service with GPU offloading and fallback
 transcription_service = create_transcription_service()
+
+def _build_llm_contents(user_text: str, use_history: bool):
+    if not use_history or not conversation_memory:
+        return user_text
+    history = conversation_memory.get_messages()
+    if not history:
+        return user_text
+    contents = []
+    for message in history:
+        contents.append(
+            types.Content(
+                role=message["role"],
+                parts=[types.Part(text=message["text"])]
+            )
+        )
+    contents.append(types.Content(role="user", parts=[types.Part(text=user_text)]))
+    return contents
 
 # Initialize Gemini client
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -405,6 +446,14 @@ class AssistantWorker:
                            'timer', 'alarm', 'remind', 'minutes', 'seconds', 'hours', 'cancel timer']
             needs_tools = any(kw in user_command.lower() for kw in home_keywords)
             
+            if conversation_memory:
+                conversation_memory.maybe_expire()
+                if should_clear_history(user_command, CONVERSATION_CLEAR_PHRASES):
+                    conversation_memory.reset()
+
+            use_history = conversation_memory is not None and not needs_tools
+            contents = _build_llm_contents(user_command, use_history)
+
             # Location context
             location_context = "User is located in Charlotte, NC (zip code 28211)."
             
@@ -421,7 +470,7 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
                 
                 response = client.models.generate_content(
                     model=model_name,
-                    contents=user_command,
+                    contents=contents,
                     config=types.GenerateContentConfig(
                         tools=[google_search_tool],
                         system_instruction=system_instruction,
@@ -443,7 +492,7 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
                 
                 response = client.models.generate_content(
                     model=model_name,
-                    contents=user_command,
+                    contents=contents,
                     config=types.GenerateContentConfig(
                         tools=GEMINI_TOOLS,
                         system_instruction=system_instruction,
@@ -471,11 +520,16 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
                         emit_tool_result(self.bus, tool_name, success=True, result=str(result), duration_ms=tool_ms)
                 
                 if has_tool_call:
+                    if conversation_memory and CONVERSATION_RESET_ON_TOOL_CALL:
+                        conversation_memory.reset()
                     emit_state_changed(self.bus, "executing", "speaking")
                     speak_tts("Done")
                     emit_state_changed(self.bus, "speaking", "idle")
                     resume_media()  # Resume music if we paused it
                 elif response.text:
+                    if conversation_memory and use_history:
+                        conversation_memory.add("user", user_command)
+                        conversation_memory.add("model", response.text)
                     print(f"💬 Computer: {response.text}")
                     emit_assistant_text(self.bus, response.text)
                     emit_state_changed(self.bus, "thinking", "speaking")
