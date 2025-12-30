@@ -418,6 +418,8 @@ def pause_media():
                 capture_output=True,
                 timeout=1
             )
+            _media_was_playing = True
+            return True
         except Exception:
             pass
         
@@ -447,7 +449,12 @@ def pause_media():
             pass
         except Exception:
             pass
-        
+
+        # Fallback for headless playback (mpv/ffplay)
+        if _signal_process("mpv", "-STOP") or _signal_process("ffplay", "-STOP"):
+            _media_was_playing = True
+            return True
+
         return False
     
     return False
@@ -505,9 +512,19 @@ def resume_media():
                     return True
             except Exception:
                 pass
-        
-        _media_was_playing = False
-        return False
+
+        # Fallback: send media key play/pause to frontmost app (browser, etc.)
+        try:
+            subprocess.run(
+                ["osascript", "-e", 'tell application "System Events" to key code 16 using {command down}'],
+                capture_output=True,
+                timeout=1
+            )
+            _media_was_playing = False
+            return True
+        except Exception:
+            _media_was_playing = False
+            return False
     
     elif system == "Linux":
         try:
@@ -520,7 +537,11 @@ def resume_media():
             return True
         except Exception:
             pass
-        
+
+        if _signal_process("mpv", "-CONT") or _signal_process("ffplay", "-CONT"):
+            _media_was_playing = False
+            return True
+
         _media_was_playing = False
         return False
     
@@ -531,6 +552,12 @@ def resume_media():
 def is_media_paused_by_assistant():
     """Check if we paused media and should resume later."""
     return _media_was_playing
+
+
+def clear_media_pause_state():
+    """Clear any pending resume state when a new playback starts."""
+    global _media_was_playing
+    _media_was_playing = False
 
 
 def pause_audio():
