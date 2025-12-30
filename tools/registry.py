@@ -18,7 +18,7 @@ GEMINI_TOOLS = [
         function_declarations=[
             types.FunctionDeclaration(
                 name="control_home_lighting",
-                description="Controls home lights. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89. For all lights use device_id=999 with brightness=100 (on) or 0 (off).",
+                description="Controls home lights. Kitchen Cans=85, Foyer=87, Stairs=89, Upstairs Hall=91, Front Door=93, Kitchen Island=95, Downstairs Hallway=97, Upstairs Deck=99, Family Room=204, Breakfast=206. For all lights use device_id=999 with brightness=100 (on) or 0 (off).",
                 parameters=types.Schema(
                     type="OBJECT",
                     properties={
@@ -201,7 +201,7 @@ TOOL_SPECS = [
         "type": "function",
         "function": {
             "name": "control_home_lighting",
-            "description": "Controls home lights. Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89. For all lights use device_id=999 with brightness=100 (on) or 0 (off).",
+            "description": "Controls home lights. Kitchen Cans=85, Foyer=87, Stairs=89, Upstairs Hall=91, Front Door=93, Kitchen Island=95, Downstairs Hallway=97, Upstairs Deck=99, Family Room=204, Breakfast=206. For all lights use device_id=999 with brightness=100 (on) or 0 (off).",
             "parameters": {
                 "type": "object",
                 "properties": {

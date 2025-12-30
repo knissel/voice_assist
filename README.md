@@ -160,10 +160,15 @@ python run_assistant.py
 
 **Device IDs:**
 - Kitchen Cans: 85
-- Kitchen Island: 95
-- Family Room: 204
 - Foyer: 87
 - Stairs: 89
+- Upstairs Hall: 91
+- Front Door: 93
+- Kitchen Island: 95
+- Downstairs Hallway: 97
+- Upstairs Deck: 99
+- Family Room: 204
+- Breakfast: 206
 
 ### Bluetooth & Audio Control
 - "Connect to [device name]"

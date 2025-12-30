@@ -118,7 +118,9 @@ def _run_async(coro):
 def control_home_lighting(device_id: int, brightness: int):
     """
     Adjusts home lights. 
-    Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89.
+    Kitchen Cans=85, Foyer=87, Stairs=89, Upstairs Hall=91, Front Door=93,
+    Kitchen Island=95, Downstairs Hallway=97, Upstairs Deck=99, Family Room=204,
+    Breakfast=206.
     For ALL lights: use device_id=999 with brightness=100 for All ON or brightness=0 for All OFF.
     """
     manager = _get_manager()

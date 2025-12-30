@@ -437,7 +437,7 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
         system_instruction = f"""You are Computer, a helpful voice assistant. {location_context}
 
 For lighting commands, IMMEDIATELY call control_home_lighting function with NO explanation.
-Device IDs: Kitchen Cans=85, Kitchen Island=95, Family Room=204, Foyer=87, Stairs=89.
+Device IDs: Kitchen Cans=85, Foyer=87, Stairs=89, Upstairs Hall=91, Front Door=93, Kitchen Island=95, Downstairs Hallway=97, Upstairs Deck=99, Family Room=204, Breakfast=206.
 For ALL lights: use device_id=999 with brightness=100 (ON) or brightness=0 (OFF).
 For pizza dough recipes or hydration adjustments, call pizza_dough_recipe with the requested parameters.
 
