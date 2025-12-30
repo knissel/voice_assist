@@ -5,15 +5,15 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/voice_assist
-Environment=PATH=/home/pi/voice_assist/.venv/bin:/usr/local/bin:/usr/bin:/bin
+User=knissel
+Group=knissel
+WorkingDirectory=/home/knissel/voice_assist
+Environment=PATH=/home/knissel/voice_assist/.venv/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONUNBUFFERED=1
-Environment=HOME=/home/pi
+Environment=HOME=/home/knissel
 
 # Main executable
-ExecStart=/home/pi/voice_assist/.venv/bin/python wakeword.py
+ExecStart=/home/knissel/voice_assist/.venv/bin/python wakeword.py
 
 # Restart policy
 Restart=always
@@ -31,12 +31,15 @@ CPUQuota=80%
 MemoryMax=768M
 MemoryHigh=512M
 
+# Ensure runtime dirs exist
+ExecStartPre=/bin/mkdir -p /home/knissel/voice_assist/logs
+
 # Security hardening (optional, may need adjustment)
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/tmp /home/pi/voice_assist/logs
-PrivateTmp=true
+# NoNewPrivileges=true
+# ProtectSystem=strict
+# ProtectHome=read-only
+# ReadWritePaths=/tmp /home/knissel/voice_assist/logs
+# PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
