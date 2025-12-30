@@ -56,6 +56,46 @@ def _get_env_int(name: str, default: int) -> int:
         print(f"Invalid {name}={value!r}; using default {default}")
         return default
 
+def _select_input_device_index(pa: pyaudio.PyAudio, preferred: str | None) -> int | None:
+    """Resolve an input device index from an env override (index or name substring)."""
+    if not preferred:
+        return None
+    try:
+        index = int(preferred)
+        info = pa.get_device_info_by_index(index)
+        if info.get("maxInputChannels", 0) > 0:
+            print(f"🎤 Using input device index {index}: {info.get('name')}")
+            return index
+        print(f"⚠️  Device index {index} has no input channels")
+        return None
+    except ValueError:
+        needle = preferred.lower()
+    except Exception as exc:
+        print(f"⚠️  Failed to read device index {preferred!r}: {exc}")
+        return None
+
+    for i in range(pa.get_device_count()):
+        info = pa.get_device_info_by_index(i)
+        name = info.get("name", "")
+        if info.get("maxInputChannels", 0) > 0 and needle in name.lower():
+            print(f"🎤 Using input device index {i}: {name}")
+            return i
+
+    print(f"⚠️  No input device matched WAKEWORD_INPUT_DEVICE={preferred!r}")
+    return None
+
+def _open_input_stream(pa: pyaudio.PyAudio, rate: int, frames_per_buffer: int, device_index: int | None):
+    kwargs = dict(
+        format=pyaudio.paInt16,
+        channels=1,
+        rate=rate,
+        input=True,
+        frames_per_buffer=frames_per_buffer,
+    )
+    if device_index is not None:
+        kwargs["input_device_index"] = device_index
+    return pa.open(**kwargs)
+
 CONVERSATION_ENABLED = os.getenv("CONVERSATION_ENABLED", "true").lower() == "true"
 CONVERSATION_MAX_TURNS = _get_env_int("CONVERSATION_MAX_TURNS", 6)
 CONVERSATION_TTL_SECONDS = _get_env_float("CONVERSATION_TTL_SECONDS", 600.0)
@@ -568,14 +608,14 @@ def capture_audio_only():
     print("🎤 Computer is listening...")
 
     CHUNK = 1024
-    RATE = 16000
+    RATE = _get_env_int("WAKEWORD_INPUT_SAMPLE_RATE", 16000)
     MAX_RECORD_SECONDS = _get_env_float("WAKEWORD_MAX_RECORD_SECONDS", 15.0)
     GRACE_PERIOD_SECONDS = _get_env_float("WAKEWORD_GRACE_SECONDS", 0.8)
     SILENCE_DURATION = _get_env_float("WAKEWORD_SILENCE_SECONDS", 0.8)
     VAD_NORMALIZE = 1.0 / 32768.0  # Pre-computed normalization factor
     
     frames = []
-    temp_stream = pa.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
+    temp_stream = _open_input_stream(pa, RATE, CHUNK, INPUT_DEVICE_INDEX)
     
     if vad_available:
         VAD_CHUNK = 512  # Silero VAD requires exactly 512 samples for 16kHz
@@ -768,12 +808,12 @@ porcupine = pvporcupine.create(
 
 # 2. Setup the Microphone Stream
 pa = pyaudio.PyAudio()
-audio_stream = pa.open(
-    rate=porcupine.sample_rate,
-    channels=1,
-    format=pyaudio.paInt16,
-    input=True,
-    frames_per_buffer=porcupine.frame_length
+INPUT_DEVICE_INDEX = _select_input_device_index(pa, os.getenv("WAKEWORD_INPUT_DEVICE"))
+audio_stream = _open_input_stream(
+    pa,
+    porcupine.sample_rate,
+    porcupine.frame_length,
+    INPUT_DEVICE_INDEX,
 )
 
 print("👂 Listening for wake word... (Press Ctrl+C to exit)")
