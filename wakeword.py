@@ -18,7 +18,7 @@ from google.genai import types
 from piper.voice import PiperVoice
 from tools.registry import GEMINI_TOOLS, dispatch_tool
 from tools.transcription import create_transcription_service
-from tools.audio import pause_media, resume_media
+from tools.audio import pause_media, resume_media, route_to_bluetooth
 from core.tts_preprocessing import preprocess_for_tts
 from core.conversation import ConversationMemory, parse_clear_phrases, should_clear_history
 from adapters.gpu_tts_client import GPUTTSClient
@@ -34,6 +34,15 @@ except Exception:
     websockets = None
 
 load_dotenv()
+
+AUTO_ROUTE_BT_SINK = os.getenv("AUTO_ROUTE_BT_SINK", "true").lower() == "true"
+BT_AUDIO_DEVICE_NAME = os.getenv("BT_AUDIO_DEVICE_NAME")
+
+if AUTO_ROUTE_BT_SINK:
+    try:
+        print(f"🔊 {route_to_bluetooth(BT_AUDIO_DEVICE_NAME)}")
+    except Exception as e:
+        print(f"⚠️  Bluetooth routing failed: {e}")
 
 def _get_env_float(name: str, default: float) -> float:
     """Parse a float env var with a safe fallback."""
@@ -95,6 +104,14 @@ def _open_input_stream(pa: pyaudio.PyAudio, rate: int, frames_per_buffer: int, d
     if device_index is not None:
         kwargs["input_device_index"] = device_index
     return pa.open(**kwargs)
+
+def _open_wakeword_stream(pa: pyaudio.PyAudio, device_index: int | None):
+    return _open_input_stream(
+        pa,
+        porcupine.sample_rate,
+        porcupine.frame_length,
+        device_index,
+    )
 
 CONVERSATION_ENABLED = os.getenv("CONVERSATION_ENABLED", "true").lower() == "true"
 CONVERSATION_MAX_TURNS = _get_env_int("CONVERSATION_MAX_TURNS", 6)
@@ -304,9 +321,11 @@ class PersistentAudioOutput:
     Creating/destroying streams costs ~50-100ms each time on Pi.
     """
     
-    def __init__(self, sample_rate: int = 22050, channels: int = 1):
+    def __init__(self, sample_rate: int = 22050, channels: int = 1, device: int | str | None = None, allow_stereo_fallback: bool = True):
         self.sample_rate = sample_rate
         self.channels = channels
+        self.device = device
+        self.allow_stereo_fallback = allow_stereo_fallback
         self._stream = None
         self._lock = threading.Lock()
     
@@ -318,12 +337,28 @@ class PersistentAudioOutput:
                     self._stream.close()
                 except Exception:
                     pass
-            self._stream = sd.OutputStream(
-                samplerate=self.sample_rate,
-                channels=self.channels,
-                dtype='int16'
-            )
-            self._stream.start()
+            try:
+                self._stream = sd.OutputStream(
+                    samplerate=self.sample_rate,
+                    channels=self.channels,
+                    dtype='int16',
+                    device=self.device
+                )
+                self._stream.start()
+            except Exception as e:
+                # Fallback to stereo if device rejects mono.
+                if self.channels == 1 and self.allow_stereo_fallback:
+                    print(f"⚠️  OutputStream failed (mono). Retrying stereo: {e}")
+                    self.channels = 2
+                    self._stream = sd.OutputStream(
+                        samplerate=self.sample_rate,
+                        channels=self.channels,
+                        dtype='int16',
+                        device=self.device
+                    )
+                    self._stream.start()
+                else:
+                    raise
     
     def write(self, audio_data: np.ndarray):
         """Write audio data to the persistent stream."""
@@ -353,9 +388,19 @@ class PersistentAudioOutput:
 # Global persistent audio output (initialized after piper_voice is loaded)
 tts_audio_output = None
 if piper_voice:
+    output_device = os.getenv("TTS_OUTPUT_DEVICE")
+    output_channels = _get_env_int("TTS_OUTPUT_CHANNELS", 1)
+    allow_stereo_fallback = os.getenv("TTS_OUTPUT_ALLOW_STEREO_FALLBACK", "true").lower() == "true"
+    if output_device is not None:
+        try:
+            output_device = int(output_device)
+        except ValueError:
+            pass
     tts_audio_output = PersistentAudioOutput(
         sample_rate=piper_voice.config.sample_rate,
-        channels=1
+        channels=output_channels,
+        device=output_device,
+        allow_stereo_fallback=allow_stereo_fallback
     )
 
 # Initialize GPU TTS client with Piper fallback
@@ -733,6 +778,13 @@ def capture_and_process():
     if audio_path:
         assistant_worker.submit(audio_path)
 
+def _to_stereo(audio_data: np.ndarray) -> np.ndarray:
+    if audio_data.ndim == 1:
+        return np.repeat(audio_data[:, None], 2, axis=1)
+    if audio_data.shape[1] == 1:
+        return np.repeat(audio_data, 2, axis=1)
+    return audio_data
+
 def speak_tts(text):
     """
     Speak text using GPU TTS (XTTS) with Piper fallback.
@@ -760,6 +812,8 @@ def speak_tts(text):
                 audio_data = gpu_tts_client._resample(
                     audio_data, sample_rate, tts_audio_output.sample_rate
                 )
+            if tts_audio_output.channels == 2:
+                audio_data = _to_stereo(audio_data)
             tts_audio_output.write(audio_data)
             return
     
@@ -767,6 +821,8 @@ def speak_tts(text):
     if piper_voice and tts_audio_output:
         for audio_chunk in piper_voice.synthesize(text):
             int_data = np.frombuffer(audio_chunk.audio_int16_bytes, dtype=np.int16)
+            if tts_audio_output.channels == 2:
+                int_data = _to_stereo(int_data)
             tts_audio_output.write(int_data)
     elif piper_voice:
         # Fallback to per-call stream if persistent output not available
@@ -809,12 +865,7 @@ porcupine = pvporcupine.create(
 # 2. Setup the Microphone Stream
 pa = pyaudio.PyAudio()
 INPUT_DEVICE_INDEX = _select_input_device_index(pa, os.getenv("WAKEWORD_INPUT_DEVICE"))
-audio_stream = _open_input_stream(
-    pa,
-    porcupine.sample_rate,
-    porcupine.frame_length,
-    INPUT_DEVICE_INDEX,
-)
+audio_stream = _open_wakeword_stream(pa, INPUT_DEVICE_INDEX)
 
 print("👂 Listening for wake word... (Press Ctrl+C to exit)")
 
@@ -851,7 +902,19 @@ try:
             
             # Capture audio (blocking, but fast ~1-10s)
             # Then submit to worker for async processing
+            try:
+                audio_stream.stop_stream()
+                audio_stream.close()
+            except Exception:
+                pass
+
             capture_and_process()
+
+            try:
+                audio_stream = _open_wakeword_stream(pa, INPUT_DEVICE_INDEX)
+            except Exception as e:
+                print(f"⚠️  Failed to restart wakeword stream: {e}")
+                break
             
             # Main loop immediately returns to listening for wake word
             # Worker thread handles transcription/LLM/TTS in background

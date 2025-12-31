@@ -14,6 +14,8 @@ Environment=PATH=/home/knissel/voice_assist/.venv/bin:/usr/local/bin:/usr/bin:/b
 Environment=PYTHONUNBUFFERED=1
 Environment=HOME=/home/knissel
 Environment=PA_ALSA_PLUGHW=1
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
 
 # Main executable
 ExecStart=/home/knissel/voice_assist/.venv/bin/python wakeword.py

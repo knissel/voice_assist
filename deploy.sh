@@ -26,6 +26,7 @@ set -e
 PI_HOST="${PI_HOST:-pi@raspberrypi.local}"
 PI_PATH="${PI_PATH:-/home/pi/voice_assist}"
 SERVICE_NAME="${SERVICE_NAME:-voice-assistant}"
+UI_SERVICE_NAME="${UI_SERVICE_NAME:-voice-assistant-ui}"
 
 # Load config file if exists
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +46,7 @@ DEPLOY_UI=false
 DEPLOY_WAKEWORD=false
 DEPLOY_ALL=false
 DO_RESTART=false
+DO_RESTART_UI=false
 SHOW_LOGS=false
 DRY_RUN=false
 
@@ -124,6 +126,7 @@ rsync_deploy() {
 deploy_ui() {
     log "Deploying UI files..."
     rsync_deploy "ui/" "ui" "ui/"
+    rsync_deploy "ui_server.py" "ui_server.py" "ui_server.py"
 }
 
 deploy_wakeword() {
@@ -139,6 +142,7 @@ deploy_config() {
     log "Deploying config files..."
     rsync_deploy "requirements_pi.txt" "requirements_pi.txt" "requirements_pi.txt"
     rsync_deploy "voice-assistant.service" "voice-assistant.service" "voice-assistant.service"
+    rsync_deploy "voice-assistant-ui.service" "voice-assistant-ui.service" "voice-assistant-ui.service"
 }
 
 restart_service() {
@@ -158,6 +162,17 @@ restart_service() {
     else
         log_error "Service may have failed. Run with --logs to see output"
     fi
+}
+
+restart_ui_service() {
+    log "Restarting $UI_SERVICE_NAME service..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_warn "[DRY-RUN] Would restart UI service"
+        return
+    fi
+
+    ssh "$PI_HOST" "sudo systemctl restart $UI_SERVICE_NAME"
 }
 
 show_logs() {
@@ -193,8 +208,10 @@ if $DEPLOY_ALL; then
     deploy_wakeword
     deploy_config
     DO_RESTART=true
+    DO_RESTART_UI=true
 elif $DEPLOY_UI; then
     deploy_ui
+    DO_RESTART_UI=true
 elif $DEPLOY_WAKEWORD; then
     deploy_wakeword
     DO_RESTART=true
@@ -205,10 +222,18 @@ if $DO_RESTART && ! $SHOW_LOGS; then
     restart_service
 fi
 
+# Restart UI service if needed
+if $DO_RESTART_UI && ! $SHOW_LOGS; then
+    restart_ui_service
+fi
+
 # Show logs if requested
 if $SHOW_LOGS; then
     if $DO_RESTART; then
         restart_service
+    fi
+    if $DO_RESTART_UI; then
+        restart_ui_service
     fi
     show_logs
 fi
