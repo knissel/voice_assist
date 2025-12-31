@@ -6,6 +6,7 @@
 #   --ui        Deploy UI files only
 #   --wakeword  Deploy wakeword and related modules
 #   --all       Deploy everything (default if no option)
+#   --env       Deploy .env file
 #   --restart   Restart the service only
 #   --logs      Show live service logs after deploy
 #   --dry-run   Show what would be deployed
@@ -18,6 +19,7 @@
 #   ./deploy.sh --all              # Deploy everything and restart
 #   ./deploy.sh --ui               # Deploy only UI changes
 #   ./deploy.sh --wakeword --logs  # Deploy wakeword and show logs
+#   ./deploy.sh --env --restart    # Deploy .env and restart
 
 set -e
 
@@ -45,6 +47,7 @@ NC='\033[0m' # No Color
 DEPLOY_UI=false
 DEPLOY_WAKEWORD=false
 DEPLOY_ALL=false
+DEPLOY_ENV=false
 DO_RESTART=false
 DO_RESTART_UI=false
 SHOW_LOGS=false
@@ -56,11 +59,12 @@ while [[ $# -gt 0 ]]; do
         --ui) DEPLOY_UI=true; shift ;;
         --wakeword) DEPLOY_WAKEWORD=true; shift ;;
         --all) DEPLOY_ALL=true; shift ;;
+        --env) DEPLOY_ENV=true; shift ;;
         --restart) DO_RESTART=true; shift ;;
         --logs) SHOW_LOGS=true; shift ;;
         --dry-run) DRY_RUN=true; shift ;;
         --help|-h)
-            echo "Usage: ./deploy.sh [--ui] [--wakeword] [--all] [--restart] [--logs] [--dry-run]"
+            echo "Usage: ./deploy.sh [--ui] [--wakeword] [--all] [--env] [--restart] [--logs] [--dry-run]"
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -145,6 +149,15 @@ deploy_config() {
     rsync_deploy "voice-assistant-ui.service" "voice-assistant-ui.service" "voice-assistant-ui.service"
 }
 
+deploy_env() {
+    log "Deploying environment file..."
+    if [[ ! -f "$SCRIPT_DIR/.env" ]]; then
+        log_warn "  .env not found (skipping)"
+        return 0
+    fi
+    rsync_deploy ".env" ".env" ".env"
+}
+
 restart_service() {
     log "Restarting $SERVICE_NAME service..."
     
@@ -188,7 +201,7 @@ echo -e "${CYAN}╚════════════════════�
 echo ""
 
 # Default to --all if nothing specified
-if ! $DEPLOY_UI && ! $DEPLOY_WAKEWORD && ! $DEPLOY_ALL && ! $DO_RESTART && ! $SHOW_LOGS; then
+if ! $DEPLOY_UI && ! $DEPLOY_WAKEWORD && ! $DEPLOY_ALL && ! $DEPLOY_ENV && ! $DO_RESTART && ! $SHOW_LOGS; then
     echo "No options specified. Use --help for usage."
     echo ""
     echo "Quick start:"
@@ -207,6 +220,7 @@ if $DEPLOY_ALL; then
     deploy_ui
     deploy_wakeword
     deploy_config
+    DEPLOY_ENV=true
     DO_RESTART=true
     DO_RESTART_UI=true
 elif $DEPLOY_UI; then
@@ -214,7 +228,12 @@ elif $DEPLOY_UI; then
     DO_RESTART_UI=true
 elif $DEPLOY_WAKEWORD; then
     deploy_wakeword
+    DEPLOY_ENV=true
     DO_RESTART=true
+fi
+
+if $DEPLOY_ENV; then
+    deploy_env
 fi
 
 # Restart if needed

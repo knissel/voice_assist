@@ -28,7 +28,7 @@ home_tool = types.Tool(
 # This is what happens after Porcupine hears "Computer"
 def ask_gemini(user_voice_command):
     response = client.models.generate_content(
-        model="gemini-1.5-flash", # Use the flash model for speed
+        model=os.getenv("MODEL_NAME", "gemini-3-flash-preview"),
         contents=user_voice_command,
         config=types.GenerateContentConfig(
             tools=[home_tool]
