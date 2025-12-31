@@ -6,7 +6,7 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
 
 - 🎤 **Wake Word Detection**: Uses Porcupine for "americano", "computer", or custom wake words
 - 🗣️ **Speech-to-Text**: Local transcription with Whisper.cpp
-- 🤖 **AI Processing**: Google Gemini 3 Flash Preview for natural language understanding
+- 🤖 **AI Processing**: Google Gemini 2.5 Flash Lite for natural language understanding
 - 🔧 **Function Calling**: Control smart home lights, Bluetooth devices, audio routing, and YouTube Music
 - 🔊 **Text-to-Speech**: Ultra-low latency local TTS using Piper (~100-200ms)
 - ⌨️ **Push-to-Talk Mode**: Alternative mode using spacebar to activate
@@ -82,7 +82,7 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
    ```bash
    # Gemini API Configuration
    GEMINI_API_KEY=your_gemini_api_key_here
-   MODEL_NAME=gemini-3-flash-preview
+   MODEL_NAME=gemini-2.5-flash-lite
    
    # Porcupine Wake Word Configuration
    PORCUPINE_ACCESS_KEY=your_porcupine_access_key_here

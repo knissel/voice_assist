@@ -33,7 +33,7 @@ torch.set_grad_enabled(False)
 # === CONFIGURATION ===
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3-flash-preview")
+MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.5-flash-lite")
 RECORD_SECONDS = 4
 RATE = int(os.getenv("MIC_RATE", "16000"))
 CHUNK = 1024

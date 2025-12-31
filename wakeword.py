@@ -517,7 +517,7 @@ class AssistantWorker:
         print("🧠 Consulting Gemini...")
         
         try:
-            model_name = os.getenv("MODEL_NAME", "gemini-3-flash-preview")
+            model_name = os.getenv("MODEL_NAME", "gemini-2.5-flash-lite")
             
             # Detect if this needs real-time info (weather, stocks, news, sports, current events)
             realtime_keywords = ['weather', 'temperature', 'forecast', 'stock', 'price', 'market',
