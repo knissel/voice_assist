@@ -19,6 +19,7 @@
             --bg-card: #1a1a24;
             --text-primary: #ffffff;
             --text-secondary: #a0a0b0;
+            --accent-cyan: #22d3ee;
             --accent-blue: #3b82f6;
             --accent-green: #22c55e;
             --accent-orange: #f97316;
@@ -122,17 +123,16 @@
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background: var(--accent-green);
-            animation: pulse 2s infinite;
+            background: var(--text-secondary);
         }
 
         .status-dot.listening {
-            background: var(--accent-blue);
+            background: var(--accent-red);
             animation: pulse-fast 0.5s infinite;
         }
 
         .status-dot.thinking {
-            background: var(--accent-orange);
+            background: var(--accent-blue);
             animation: pulse-fast 0.8s infinite;
         }
 
@@ -145,6 +145,11 @@
             background: var(--accent-red);
         }
 
+        .status-badge.wakeword {
+            box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.8), 0 0 12px rgba(34, 211, 238, 0.35);
+            animation: wakeword-flash 0.6s ease-out;
+        }
+
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -153,6 +158,11 @@
         @keyframes pulse-fast {
             0%, 100% { transform: scale(1); opacity: 1; }
             50% { transform: scale(1.2); opacity: 0.7; }
+        }
+
+        @keyframes wakeword-flash {
+            0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.9), 0 0 0 rgba(34, 211, 238, 0.0); }
+            100% { box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.0), 0 0 18px rgba(34, 211, 238, 0.0); }
         }
 
         /* GPU compositing hints for smoother animations on Pi */
@@ -1124,10 +1134,12 @@
         let timers = {};
         let currentState = 'idle';
         let currentRecipe = null;
+        let wakewordTimeoutId = null;
         const toolMetaEl = document.getElementById('toolMeta');
         const timersPanelEl = document.getElementById('timersPanel');
         const timersCountEl = document.getElementById('timersCount');
         const sidePanelEl = document.querySelector('.side-panel');
+        const statusBadgeEl = document.querySelector('.status-badge');
 
         // Connect to WebSocket
         function connect() {
@@ -1177,6 +1189,7 @@
                     handleStateChange(event.data);
                     break;
                 case 'wakeword_detected':
+                    flashWakewordIndicator();
                     addMessage('system', 'WAKE: Wake word detected');
                     break;
                 case 'transcript_final':
@@ -1229,6 +1242,22 @@
 
             const status = statusMap[currentState] || { text: currentState, class: '' };
             updateStatus(currentState, status.text);
+        }
+
+        function flashWakewordIndicator() {
+            if (!statusBadgeEl) {
+                return;
+            }
+            statusBadgeEl.classList.remove('wakeword');
+            void statusBadgeEl.offsetWidth;
+            statusBadgeEl.classList.add('wakeword');
+            if (wakewordTimeoutId) {
+                clearTimeout(wakewordTimeoutId);
+            }
+            wakewordTimeoutId = setTimeout(() => {
+                statusBadgeEl.classList.remove('wakeword');
+                wakewordTimeoutId = null;
+            }, 650);
         }
 
         function updateStatus(state, text) {

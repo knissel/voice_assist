@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import json
 import pyaudio
 import struct
@@ -639,145 +640,6 @@ IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for na
 # Global worker instance
 assistant_worker = AssistantWorker(event_bus)
 
-def capture_audio_only():
-    """
-    Record audio with VAD and return the path to the saved file.
-    This runs in the main thread to keep audio capture real-time safe.
-    Returns the path to the audio file, or None if recording failed.
-    
-    Optimized for Raspberry Pi 5:
-    - Ring buffer instead of np.concatenate (O(1) vs O(n))
-    - Pre-allocated tensor buffer to avoid allocations in hot loop
-    - Grace period before checking silence (time to collect thoughts)
-    """
-    print("🎤 Computer is listening...")
-
-    CHUNK = 1024
-    RATE = _get_env_int("WAKEWORD_INPUT_SAMPLE_RATE", 16000)
-    MAX_RECORD_SECONDS = _get_env_float("WAKEWORD_MAX_RECORD_SECONDS", 15.0)
-    GRACE_PERIOD_SECONDS = _get_env_float("WAKEWORD_GRACE_SECONDS", 0.8)
-    SILENCE_DURATION = _get_env_float("WAKEWORD_SILENCE_SECONDS", 0.8)
-    VAD_NORMALIZE = 1.0 / 32768.0  # Pre-computed normalization factor
-    
-    frames = []
-    temp_stream = _open_input_stream(pa, RATE, CHUNK, INPUT_DEVICE_INDEX)
-    
-    if vad_available:
-        VAD_CHUNK = 512  # Silero VAD requires exactly 512 samples for 16kHz
-        silence_chunks = 0
-        silence_threshold = int(SILENCE_DURATION * RATE / VAD_CHUNK)
-        max_chunks = int(MAX_RECORD_SECONDS * RATE / CHUNK)
-        grace_chunks = int(GRACE_PERIOD_SECONDS * RATE / CHUNK)
-        
-        # Pre-allocate ring buffer for VAD (avoids O(n) concatenation)
-        RING_SIZE = VAD_CHUNK * 4  # Hold ~4 VAD windows
-        ring_buffer = np.zeros(RING_SIZE, dtype=np.int16)
-        ring_write_pos = 0
-        ring_read_pos = 0
-        ring_available = 0
-        
-        # Pre-allocate tensor buffer (reused each iteration)
-        vad_tensor_buffer = torch.zeros(VAD_CHUNK, dtype=torch.float32)
-        
-        speech_detected = False  # Track if we've heard any speech yet
-        
-        for i in range(max_chunks):
-            try:
-                data = temp_stream.read(CHUNK, exception_on_overflow=False)
-            except Exception as e:
-                print(f"⚠️  Audio read error: {e}")
-                break
-            
-            frames.append(data)
-            
-            # Write to ring buffer (O(1) operation)
-            audio_int16 = np.frombuffer(data, dtype=np.int16)
-            chunk_len = len(audio_int16)
-            
-            # Handle wrap-around in ring buffer
-            end_pos = ring_write_pos + chunk_len
-            if end_pos <= RING_SIZE:
-                ring_buffer[ring_write_pos:end_pos] = audio_int16
-            else:
-                first_part = RING_SIZE - ring_write_pos
-                ring_buffer[ring_write_pos:] = audio_int16[:first_part]
-                ring_buffer[:chunk_len - first_part] = audio_int16[first_part:]
-            
-            ring_write_pos = end_pos % RING_SIZE
-            ring_available += chunk_len
-            
-            # Process VAD in 512-sample chunks from ring buffer
-            while ring_available >= VAD_CHUNK:
-                # Read from ring buffer (O(1) operation)
-                if ring_read_pos + VAD_CHUNK <= RING_SIZE:
-                    vad_chunk = ring_buffer[ring_read_pos:ring_read_pos + VAD_CHUNK]
-                else:
-                    first_part = RING_SIZE - ring_read_pos
-                    vad_chunk = np.concatenate([
-                        ring_buffer[ring_read_pos:],
-                        ring_buffer[:VAD_CHUNK - first_part]
-                    ])
-                
-                ring_read_pos = (ring_read_pos + VAD_CHUNK) % RING_SIZE
-                ring_available -= VAD_CHUNK
-                
-                # Convert to tensor in-place (reuse buffer, pre-computed normalization)
-                vad_tensor_buffer[:] = torch.from_numpy(vad_chunk.astype(np.float32) * VAD_NORMALIZE)
-                
-                try:
-                    speech_prob = vad_model(vad_tensor_buffer, RATE).item()
-                    
-                    if speech_prob >= 0.5:
-                        speech_detected = True
-                        silence_chunks = 0
-                    else:
-                        silence_chunks += 1
-                except Exception:
-                    pass
-            
-            # Only check for end-of-speech after grace period
-            # AND only if we've detected speech at some point
-            if i >= grace_chunks and speech_detected and silence_chunks >= silence_threshold:
-                print(f"🛑 Speech ended (recorded {len(frames) * CHUNK / RATE:.1f}s)")
-                break
-            
-            # Also stop if we've been in grace period and heard nothing at all
-            # (prevents hanging if user doesn't speak)
-            if i >= grace_chunks * 2 and not speech_detected:
-                print(f"🛑 No speech detected (waited {len(frames) * CHUNK / RATE:.1f}s)")
-                break
-    else:
-        RECORD_SECONDS = 4
-        for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-            data = temp_stream.read(CHUNK)
-            frames.append(data)
-    
-    temp_stream.stop_stream()
-    temp_stream.close()
-    
-    if not frames:
-        return None
-
-    # Save to temp file with unique timestamp
-    temp_audio_path = f"/tmp/computer_command_{int(time.time())}.wav"
-    with wave.open(temp_audio_path, 'wb') as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(pa.get_sample_size(pyaudio.paInt16))
-        wf.setframerate(RATE)
-        wf.writeframes(b''.join(frames))
-    
-    return temp_audio_path
-
-def capture_and_process():
-    """
-    Capture audio and submit to worker thread for async processing.
-    Audio capture happens in main thread (real-time safe).
-    Processing happens in background (non-blocking).
-    """
-    audio_path = capture_audio_only()
-    if audio_path:
-        assistant_worker.submit(audio_path)
-
 def _to_stereo(audio_data: np.ndarray) -> np.ndarray:
     if audio_data.ndim == 1:
         return np.repeat(audio_data[:, None], 2, axis=1)
@@ -853,6 +715,15 @@ def play_audio(audio_path: str) -> None:
             return
     print("⚠️  No audio player found. Install ffmpeg or use a system with audio support.")
 
+# ==========================================
+# ⚡️ ZERO-STOP AUDIO LOOP
+# ==========================================
+
+class AudioRecorderState:
+    LISTENING = 0
+    RECORDING = 1
+    PROCESSING = 2
+
 # 1. Setup the Engine
 # 'keywords' can be standard ones like ['computer']
 # or a path to your custom 'Gemini.ppn' file.
@@ -862,62 +733,130 @@ porcupine = pvporcupine.create(
     keywords=['computer']
 )
 
-# 2. Setup the Microphone Stream
+# 2. Setup the Microphone Stream (Open once, never close during runtime)
 pa = pyaudio.PyAudio()
 INPUT_DEVICE_INDEX = _select_input_device_index(pa, os.getenv("WAKEWORD_INPUT_DEVICE"))
-audio_stream = _open_wakeword_stream(pa, INPUT_DEVICE_INDEX)
+audio_stream = pa.open(
+    rate=porcupine.sample_rate,
+    channels=1,
+    format=pyaudio.paInt16,
+    input=True,
+    frames_per_buffer=porcupine.frame_length,
+    input_device_index=INPUT_DEVICE_INDEX
+)
 
-print("👂 Listening for wake word... (Press Ctrl+C to exit)")
+FRAME_LENGTH = porcupine.frame_length
+SAMPLE_RATE = porcupine.sample_rate
+PRE_ROLL_SECONDS = _get_env_float("WAKEWORD_PRE_ROLL_SECONDS", 1.5)
+MAX_PRE_ROLL_FRAMES = max(1, int(SAMPLE_RATE * PRE_ROLL_SECONDS / FRAME_LENGTH))
+
+SILENCE_SECONDS = _get_env_float("WAKEWORD_SILENCE_SECONDS", 0.8)
+MAX_RECORD_SECONDS = _get_env_float("WAKEWORD_MAX_RECORD_SECONDS", 15.0)
+GRACE_SECONDS = _get_env_float("WAKEWORD_GRACE_SECONDS", 0.8)
+FIXED_RECORD_SECONDS = _get_env_float("WAKEWORD_FIXED_RECORD_SECONDS", 4.0)
+
+SILENCE_LIMIT_FRAMES = max(1, int(SILENCE_SECONDS * SAMPLE_RATE / FRAME_LENGTH))
+MAX_RECORD_FRAMES = max(1, int(MAX_RECORD_SECONDS * SAMPLE_RATE / FRAME_LENGTH))
+GRACE_FRAMES = max(1, int(GRACE_SECONDS * SAMPLE_RATE / FRAME_LENGTH))
+NO_SPEECH_FRAMES = max(1, GRACE_FRAMES * 2)
+FIXED_RECORD_FRAMES = max(1, int(FIXED_RECORD_SECONDS * SAMPLE_RATE / FRAME_LENGTH))
+VAD_NORMALIZE = 1.0 / 32768.0
+
+print(f"👂 High-Performance Loop Started. Pre-roll buffer: {MAX_PRE_ROLL_FRAMES} frames")
+
+# 3. State Variables
+state = AudioRecorderState.LISTENING
+pre_roll_buffer = collections.deque(maxlen=MAX_PRE_ROLL_FRAMES)
+current_command_frames = []
+vad_silence_counter = 0
+recording_frames = 0
+speech_detected = False
+vad_tensor = torch.zeros(FRAME_LENGTH, dtype=torch.float32)
 
 # Start the worker thread
 assistant_worker.start()
 
-# 3. The "Infinite Ear" Loop
+# 4. The "Infinite Ear" Loop
 try:
     while True:
-        # Read a tiny chunk of audio (approx 0.03 seconds worth)
-        pcm = audio_stream.read(porcupine.frame_length, exception_on_overflow=False)
-        
-        # Unpack bits to match Porcupine's expected format
-        pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)
+        # -----------------------------------------------------
+        # 1. READ AUDIO (Non-blocking / Low Latency)
+        # -----------------------------------------------------
+        try:
+            pcm_bytes = audio_stream.read(FRAME_LENGTH, exception_on_overflow=False)
+        except IOError:
+            continue
 
-        # Process the chunk
-        keyword_index = porcupine.process(pcm)
+        pre_roll_buffer.append(pcm_bytes)
 
-        # 4. Wake Word Detected!
-        if keyword_index >= 0:
-            # Skip if already processing a command
-            if assistant_worker.is_processing:
-                print("⚠️  Still processing previous command...")
-                continue
-            
-            print("🔔 Wake word detected!")
-            
-            # Auto-pause any playing music so user doesn't have to talk over it
-            if pause_media():
-                print("⏸️  Paused media playback")
-            
-            event_bus.emit("wakeword_detected", {"keyword_index": keyword_index})
-            emit_state_changed(event_bus, "idle", "listening")
-            
-            # Capture audio (blocking, but fast ~1-10s)
-            # Then submit to worker for async processing
-            try:
-                audio_stream.stop_stream()
-                audio_stream.close()
-            except Exception:
-                pass
+        # -----------------------------------------------------
+        # 2. STATE MACHINE
+        # -----------------------------------------------------
+        if state == AudioRecorderState.LISTENING:
+            pcm = struct.unpack_from("h" * FRAME_LENGTH, pcm_bytes)
+            keyword_index = porcupine.process(pcm)
 
-            capture_and_process()
+            if keyword_index >= 0:
+                if assistant_worker.is_processing:
+                    print("⚠️  Still processing previous command...")
+                    continue
 
-            try:
-                audio_stream = _open_wakeword_stream(pa, INPUT_DEVICE_INDEX)
-            except Exception as e:
-                print(f"⚠️  Failed to restart wakeword stream: {e}")
-                break
-            
-            # Main loop immediately returns to listening for wake word
-            # Worker thread handles transcription/LLM/TTS in background
+                print("🔔 Wake word detected! (Instant Switch)")
+
+                if pause_media():
+                    print("⏸️  Paused media playback")
+
+                event_bus.emit("wakeword_detected", {"keyword_index": keyword_index})
+                emit_state_changed(event_bus, "idle", "listening")
+
+                current_command_frames = list(pre_roll_buffer)
+                vad_silence_counter = 0
+                recording_frames = 0
+                speech_detected = False
+                state = AudioRecorderState.RECORDING
+
+        elif state == AudioRecorderState.RECORDING:
+            current_command_frames.append(pcm_bytes)
+            recording_frames += 1
+
+            if vad_available:
+                audio_int16 = np.frombuffer(pcm_bytes, dtype=np.int16)
+                vad_tensor[:] = torch.from_numpy(audio_int16.astype(np.float32) * VAD_NORMALIZE)
+                try:
+                    speech_prob = vad_model(vad_tensor, SAMPLE_RATE).item()
+                    if speech_prob >= 0.5:
+                        speech_detected = True
+                        vad_silence_counter = 0
+                    else:
+                        if speech_detected or recording_frames >= GRACE_FRAMES:
+                            vad_silence_counter += 1
+                except Exception:
+                    if speech_detected or recording_frames >= GRACE_FRAMES:
+                        vad_silence_counter += 1
+
+                is_silence_timeout = speech_detected and vad_silence_counter >= SILENCE_LIMIT_FRAMES
+                is_max_length = recording_frames >= MAX_RECORD_FRAMES
+            else:
+                is_silence_timeout = False
+                is_max_length = recording_frames >= FIXED_RECORD_FRAMES
+
+            is_no_speech_timeout = not speech_detected and recording_frames >= NO_SPEECH_FRAMES
+
+            if is_silence_timeout or is_max_length or is_no_speech_timeout:
+                print(f"🛑 Capture complete. Frames: {len(current_command_frames)}")
+
+                temp_audio_path = f"/tmp/cmd_{int(time.time())}.wav"
+                with wave.open(temp_audio_path, 'wb') as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(pa.get_sample_size(pyaudio.paInt16))
+                    wf.setframerate(SAMPLE_RATE)
+                    wf.writeframes(b''.join(current_command_frames))
+
+                assistant_worker.submit(temp_audio_path)
+
+                current_command_frames = []
+                pre_roll_buffer.clear()
+                state = AudioRecorderState.LISTENING
 
 except KeyboardInterrupt:
     print("\n👋 Shutting down...")
