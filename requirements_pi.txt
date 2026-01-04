@@ -13,7 +13,7 @@ sounddevice>=0.4.6
 numpy>=1.24.0,<2.0.0
 
 # Wake word detection
-pvporcupine>=3.0.0
+openwakeword
 
 # TTS (local, fast)
 piper-tts>=1.2.0

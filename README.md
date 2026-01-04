@@ -4,7 +4,7 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
 
 ## Features
 
-- 🎤 **Wake Word Detection**: Uses Porcupine for "americano", "computer", or custom wake words
+- 🎤 **Wake Word Detection**: Uses OpenWakeWord (open source) for built-in or custom wake words
 - 🗣️ **Speech-to-Text**: Local transcription with Whisper.cpp
 - 🤖 **AI Processing**: Google Gemini 2.5 Flash Lite for natural language understanding
 - 🔧 **Function Calling**: Control smart home lights, Bluetooth devices, audio routing, and YouTube Music
@@ -19,7 +19,7 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
 - macOS or Linux (Raspberry Pi supported)
 - [Whisper.cpp](https://github.com/ggerganov/whisper.cpp) installed locally
 - Google Gemini API key
-- Porcupine access key (for wake word detection)
+- OpenWakeWord models (no API key required)
 - Piper TTS voice model (for local text-to-speech)
 
 ## Installation
@@ -84,8 +84,11 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
    GEMINI_API_KEY=your_gemini_api_key_here
    MODEL_NAME=gemini-2.5-flash-lite
    
-   # Porcupine Wake Word Configuration
-   PORCUPINE_ACCESS_KEY=your_porcupine_access_key_here
+   # OpenWakeWord Configuration (open source wake word)
+   # WAKEWORD_MODELS=hey_jarvis
+   # WAKEWORD_THRESHOLD=0.5
+   # WAKEWORD_FRAME_LENGTH=1280
+   # WAKEWORD_INPUT_SAMPLE_RATE=16000
    
    # Whisper Configuration (update paths if needed)
    WHISPER_PATH=/path/to/whisper.cpp/build/bin/whisper-cli
@@ -108,11 +111,11 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
 3. Create a new API key
 4. Copy the key to your `.env` file
 
-### Porcupine Access Key
-1. Visit [Picovoice Console](https://console.picovoice.ai/)
-2. Sign up for a free account
-3. Create an access key
-4. Copy the key to your `.env` file
+### OpenWakeWord Models
+1. No API keys required
+2. Default: `WAKEWORD_MODELS=hey_jarvis` (auto-downloads on first run)
+3. Custom model: set `WAKEWORD_MODELS=/path/to/your_model.onnx`
+4. Training guide: see `docs/WAKEWORD_OPENWAKEWORD.md`
 
 ### Piper TTS Voice Models
 1. See [PIPER_TTS_SETUP.md](docs/PIPER_TTS_SETUP.md) for detailed setup
@@ -124,7 +127,7 @@ A voice-controlled assistant powered by Google Gemini Flash that can control sma
 
 ### Wake Word Mode (Continuous Listening)
 
-Run the wake word listener that responds to "americano" or "computer":
+Run the wake word listener (default wake word: `hey_jarvis`):
 
 ```bash
 python wakeword.py
@@ -230,18 +233,22 @@ voice_assist/
 
 ### Change Wake Words
 
-Edit `wakeword.py` line 161:
-```python
-keywords=['americano', 'computer']  # Change to your preferred wake words
+Set `WAKEWORD_MODELS` in your `.env`:
+```bash
+WAKEWORD_MODELS=hey_jarvis
 ```
 
-Or use a custom wake word:
-1. Train a custom wake word at [Picovoice Console](https://console.picovoice.ai/)
-2. Download the `.ppn` file
-3. Update the keywords parameter:
-```python
-keywords=['/path/to/custom_wakeword.ppn']
+Use a custom model:
+```bash
+WAKEWORD_MODELS=models/wakeword/my_wakeword.onnx
 ```
+
+Multiple models can be comma-separated:
+```bash
+WAKEWORD_MODELS=hey_jarvis,models/wakeword/my_wakeword.onnx
+```
+
+To train your own wake word, record samples and follow `docs/WAKEWORD_OPENWAKEWORD.md`.
 
 ### Change Voice Model
 
@@ -410,9 +417,10 @@ sudo systemctl disable voice-assistant  # Disable auto-start
 - Ensure you haven't exceeded API rate limits
 
 ### Wake word not detecting
-- Verify Porcupine access key
+- Verify `WAKEWORD_MODELS` points to a valid model
 - Try speaking the wake word more clearly
 - Check microphone input levels
+- Lower `WAKEWORD_THRESHOLD` if detection is too strict
 
 ### Whisper transcription errors
 - Ensure Whisper.cpp is properly built
@@ -432,5 +440,5 @@ MIT License - feel free to use this project for personal or commercial purposes.
 - [Google Gemini](https://ai.google.dev/) for the LLM
 - [Piper](https://github.com/rhasspy/piper) for ultra-fast local text-to-speech
 - [Whisper.cpp](https://github.com/ggerganov/whisper.cpp) for speech recognition
-- [Porcupine](https://picovoice.ai/platform/porcupine/) for wake word detection
+- [OpenWakeWord](https://github.com/dscripka/openWakeWord) for wake word detection
 - [pyControl4](https://github.com/lawtancool/pyControl4) for Control4 integration

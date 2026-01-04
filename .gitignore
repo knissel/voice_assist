@@ -26,9 +26,11 @@ wheels/
 
 # Virtual Environment
 .venv/
+.venv_kokoro/
 venv/
 ENV/
 env/
+tools/tmp_kokoro/
 
 # IDE
 .vscode/

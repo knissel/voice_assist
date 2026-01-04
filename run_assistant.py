@@ -10,6 +10,7 @@ import wave
 import subprocess
 import json
 import os
+import tempfile
 import numpy as np
 import sounddevice as sd
 import torch
@@ -354,7 +355,7 @@ def record_audio():
     stream.stop_stream()
     stream.close()
     
-    temp_path = "/tmp/assistant_command.wav"
+    temp_path = os.path.join(tempfile.gettempdir(), "assistant_command.wav")
     with wave.open(temp_path, 'wb') as wf:
         wf.setnchannels(1)
         wf.setsampwidth(pa.get_sample_size(pyaudio.paInt16))

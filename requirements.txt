@@ -1,6 +1,6 @@
 google-genai
 pyaudio
-pvporcupine
+openwakeword
 pynput
 requests
 python-dotenv

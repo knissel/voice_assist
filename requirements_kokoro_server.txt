@@ -1,0 +1,5 @@
+# Requirements for Kokoro TTS server
+# Install a CUDA-enabled torch build first if you want GPU acceleration.
+flask>=3.0.0
+soundfile>=0.12.0
+kokoro==0.9.4

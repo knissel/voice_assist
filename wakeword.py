@@ -2,8 +2,6 @@ import asyncio
 import collections
 import json
 import pyaudio
-import struct
-import pvporcupine
 import wave
 import subprocess
 import os
@@ -28,6 +26,10 @@ from core.event_bus import (
     emit_assistant_text, emit_tool_call, emit_tool_result, emit_error
 )
 from dotenv import load_dotenv
+try:
+    from openwakeword.model import Model as OpenWakeWordModel
+except Exception:
+    OpenWakeWordModel = None
 
 try:
     import websockets
@@ -65,6 +67,51 @@ def _get_env_int(name: str, default: int) -> int:
     except ValueError:
         print(f"Invalid {name}={value!r}; using default {default}")
         return default
+
+def _parse_comma_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+def _resolve_wakeword_models(models: list[str], repo_root: str) -> list[str]:
+    resolved = []
+    for item in models:
+        expanded = os.path.expanduser(item)
+        if not os.path.isabs(expanded):
+            candidate = os.path.join(repo_root, expanded)
+            if os.path.exists(candidate):
+                expanded = candidate
+        resolved.append(expanded)
+    return resolved
+
+class OpenWakeWordDetector:
+    def __init__(self, wakeword_models: list[str], threshold: float):
+        if OpenWakeWordModel is None:
+            raise RuntimeError(
+                "openwakeword is not installed. Install it with `pip install openwakeword`."
+            )
+        self.threshold = threshold
+        self.model = OpenWakeWordModel(wakeword_models=wakeword_models)
+
+    def process(self, pcm: np.ndarray):
+        scores = self.model.predict(pcm)
+        best_name = None
+        best_score = 0.0
+        for name, score in scores.items():
+            if score >= self.threshold and score > best_score:
+                best_name = name
+                best_score = float(score)
+        return best_name, best_score
+
+    def reset(self):
+        for method_name in ("reset", "reset_state", "reset_states"):
+            method = getattr(self.model, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception:
+                    pass
+                break
 
 def _select_input_device_index(pa: pyaudio.PyAudio, preferred: str | None) -> int | None:
     """Resolve an input device index from an env override (index or name substring)."""
@@ -105,14 +152,6 @@ def _open_input_stream(pa: pyaudio.PyAudio, rate: int, frames_per_buffer: int, d
     if device_index is not None:
         kwargs["input_device_index"] = device_index
     return pa.open(**kwargs)
-
-def _open_wakeword_stream(pa: pyaudio.PyAudio, device_index: int | None):
-    return _open_input_stream(
-        pa,
-        porcupine.sample_rate,
-        porcupine.frame_length,
-        device_index,
-    )
 
 CONVERSATION_ENABLED = os.getenv("CONVERSATION_ENABLED", "true").lower() == "true"
 CONVERSATION_MAX_TURNS = _get_env_int("CONVERSATION_MAX_TURNS", 6)
@@ -725,28 +764,38 @@ class AudioRecorderState:
     PROCESSING = 2
 
 # 1. Setup the Engine
-# 'keywords' can be standard ones like ['computer']
-# or a path to your custom 'Gemini.ppn' file.
-access_key = os.getenv("PORCUPINE_ACCESS_KEY")
-porcupine = pvporcupine.create(
-    access_key=access_key,
-    keywords=['computer']
-)
+WAKEWORD_MODELS = _parse_comma_list(os.getenv("WAKEWORD_MODELS"))
+if not WAKEWORD_MODELS:
+    WAKEWORD_MODELS = ["hey_jarvis"]
+WAKEWORD_THRESHOLD = _get_env_float("WAKEWORD_THRESHOLD", 0.5)
+WAKEWORD_FRAME_LENGTH = _get_env_int("WAKEWORD_FRAME_LENGTH", 1280)
+WAKEWORD_SAMPLE_RATE = _get_env_int("WAKEWORD_INPUT_SAMPLE_RATE", 16000)
+if WAKEWORD_SAMPLE_RATE != 16000:
+    print(
+        "Wakeword sample rate is not 16000 Hz. "
+        "OpenWakeWord models are trained for 16 kHz audio."
+    )
+
+wakeword_models = _resolve_wakeword_models(WAKEWORD_MODELS, REPO_ROOT)
+try:
+    wakeword_detector = OpenWakeWordDetector(wakeword_models, WAKEWORD_THRESHOLD)
+except Exception as exc:
+    raise SystemExit(f"Wakeword initialization failed: {exc}")
 
 # 2. Setup the Microphone Stream (Open once, never close during runtime)
 pa = pyaudio.PyAudio()
 INPUT_DEVICE_INDEX = _select_input_device_index(pa, os.getenv("WAKEWORD_INPUT_DEVICE"))
 audio_stream = pa.open(
-    rate=porcupine.sample_rate,
+    rate=WAKEWORD_SAMPLE_RATE,
     channels=1,
     format=pyaudio.paInt16,
     input=True,
-    frames_per_buffer=porcupine.frame_length,
+    frames_per_buffer=WAKEWORD_FRAME_LENGTH,
     input_device_index=INPUT_DEVICE_INDEX
 )
 
-FRAME_LENGTH = porcupine.frame_length
-SAMPLE_RATE = porcupine.sample_rate
+FRAME_LENGTH = WAKEWORD_FRAME_LENGTH
+SAMPLE_RATE = WAKEWORD_SAMPLE_RATE
 PRE_ROLL_SECONDS = _get_env_float("WAKEWORD_PRE_ROLL_SECONDS", 1.5)
 MAX_PRE_ROLL_FRAMES = max(1, int(SAMPLE_RATE * PRE_ROLL_SECONDS / FRAME_LENGTH))
 
@@ -793,20 +842,20 @@ try:
         # 2. STATE MACHINE
         # -----------------------------------------------------
         if state == AudioRecorderState.LISTENING:
-            pcm = struct.unpack_from("h" * FRAME_LENGTH, pcm_bytes)
-            keyword_index = porcupine.process(pcm)
+            pcm = np.frombuffer(pcm_bytes, dtype=np.int16)
+            keyword_name, keyword_score = wakeword_detector.process(pcm)
 
-            if keyword_index >= 0:
+            if keyword_name is not None:
                 if assistant_worker.is_processing:
                     print("⚠️  Still processing previous command...")
                     continue
 
-                print("🔔 Wake word detected! (Instant Switch)")
+                print(f"dY\"\" Wake word detected! ({keyword_name}, score={keyword_score:.2f})")
 
                 if pause_media():
                     print("⏸️  Paused media playback")
 
-                event_bus.emit("wakeword_detected", {"keyword_index": keyword_index})
+                event_bus.emit("wakeword_detected", {"keyword": keyword_name, "score": keyword_score})
                 emit_state_changed(event_bus, "idle", "listening")
 
                 current_command_frames = list(pre_roll_buffer)
@@ -856,6 +905,7 @@ try:
 
                 current_command_frames = []
                 pre_roll_buffer.clear()
+                wakeword_detector.reset()
                 state = AudioRecorderState.LISTENING
 
 except KeyboardInterrupt:
@@ -865,9 +915,8 @@ except KeyboardInterrupt:
     assistant_worker.stop()
     if tts_audio_output is not None:
         tts_audio_output.close()
-    if porcupine is not None:
-        porcupine.delete()
     if audio_stream is not None:
         audio_stream.close()
     if pa is not None:
         pa.terminate()
+
