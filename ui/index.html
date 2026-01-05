@@ -29,9 +29,12 @@
         }
 
         body {
-            /* System font stack optimized for speed - no external font loading */
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: var(--bg-primary);
+            /* Local font stack with DIN-inspired primary - no external font loading */
+            font-family: "DIN 2014", "DIN Alternate", "Avenir Next", "Noto Sans", "Liberation Sans", sans-serif;
+            background:
+                radial-gradient(1200px 700px at 10% -20%, rgba(34, 211, 238, 0.18), transparent 60%),
+                radial-gradient(900px 500px at 90% 10%, rgba(59, 130, 246, 0.18), transparent 60%),
+                var(--bg-primary);
             color: var(--text-primary);
             min-height: 100vh;
             overflow: hidden;
@@ -70,9 +73,9 @@
 
         .container {
             display: grid;
-            grid-template-rows: auto 1fr auto;
+            grid-template-rows: auto 1fr;
             height: 100vh;
-            max-width: 800px;
+            max-width: 1100px;
             margin: 0 auto;
             padding: 16px;
             gap: 16px;
@@ -80,9 +83,10 @@
 
         /* Header */
         .header {
-            display: flex;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: 1fr auto auto;
             align-items: center;
+            gap: 12px;
             padding: 8px 0;
         }
 
@@ -95,7 +99,7 @@
         .logo-icon {
             width: 40px;
             height: 40px;
-            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
             border-radius: 12px;
             display: flex;
             align-items: center;
@@ -150,6 +154,43 @@
             animation: wakeword-flash 0.6s ease-out;
         }
 
+        .header-timer {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 8px 16px;
+            min-width: 180px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+            letter-spacing: 0.3px;
+            transition: opacity 0.2s ease;
+        }
+
+        .header-timer.is-hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .header-timer-icon {
+            width: 18px;
+            height: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .header-timer-text {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 220px;
+        }
+
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -188,13 +229,13 @@
         /* Main Content */
         .main-content {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            grid-template-columns: 92px minmax(0, 2.2fr) minmax(0, 0.9fr);
             gap: 16px;
             overflow: hidden;
         }
 
         body.tool-focus .main-content {
-            grid-template-columns: minmax(0, 1.7fr) minmax(0, 0.85fr);
+            grid-template-columns: 92px minmax(0, 2.7fr) minmax(0, 0.65fr);
         }
 
         .side-panel {
@@ -207,6 +248,19 @@
 
         .side-panel.compact-timers {
             grid-template-rows: minmax(0, 1fr) auto;
+        }
+
+        .toolbox {
+            background: var(--bg-secondary);
+            border-radius: 20px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            align-items: stretch;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+            min-height: 0;
         }
 
         /* Conversation Panel */
@@ -653,8 +707,8 @@
         }
 
         .action-btn.active {
-            background: var(--accent-blue);
-            border-color: var(--accent-blue);
+            background: linear-gradient(135deg, rgba(34, 211, 238, 0.3), rgba(59, 130, 246, 0.4));
+            border-color: rgba(34, 211, 238, 0.8);
         }
 
         .action-icon,
@@ -695,6 +749,18 @@
 
         .action-btn.active .action-label {
             color: white;
+        }
+
+        .toolbox .action-btn {
+            padding: 12px 10px;
+            border-radius: 14px;
+        }
+
+        .toolbox .action-label {
+            font-size: 10px;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            text-align: center;
         }
 
         /* Timer Modal */
@@ -863,6 +929,12 @@
                 font-size: 18px;
             }
 
+            .header-timer {
+                padding: 6px 12px;
+                min-width: 140px;
+                font-size: 10px;
+            }
+
             .panel-header {
                 margin-bottom: 8px;
             }
@@ -926,6 +998,15 @@
                 gap: 8px;
             }
 
+            .toolbox {
+                padding: 8px;
+                gap: 8px;
+            }
+
+            .toolbox .action-btn {
+                padding: 10px 6px;
+            }
+
             .recipe-panel {
                 padding: 12px;
             }
@@ -952,13 +1033,44 @@
                 padding: 12px;
             }
 
+            .header {
+                grid-template-columns: 1fr auto;
+                grid-template-rows: auto auto;
+            }
+
+            .logo {
+                grid-column: 1 / 2;
+                grid-row: 1;
+            }
+
+            .status-badge {
+                grid-column: 2 / 3;
+                grid-row: 1;
+                justify-self: end;
+            }
+
+            .header-timer {
+                grid-column: 1 / -1;
+                grid-row: 2;
+                justify-self: center;
+            }
+
             .main-content {
                 grid-template-columns: 1fr;
-                grid-template-rows: minmax(0, 1.2fr) minmax(0, 0.8fr);
+                grid-template-rows: auto minmax(0, 1.2fr) minmax(0, 0.8fr);
             }
 
             body.tool-focus .main-content {
                 grid-template-columns: 1fr;
+            }
+
+            .toolbox {
+                flex-direction: row;
+                justify-content: space-between;
+            }
+
+            .toolbox .action-btn {
+                flex: 1;
             }
 
             .side-panel {
@@ -979,6 +1091,16 @@
                 <div class="logo-icon">AI</div>
                 <span class="logo-text">Computer</span>
             </div>
+            <div class="header-timer is-hidden" id="headerTimer" aria-live="polite">
+                <span class="header-timer-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <circle cx="12" cy="13" r="8" fill="none" stroke-width="2"></circle>
+                        <path d="M12 13V9" stroke-width="2" stroke-linecap="round"></path>
+                        <path d="M9 2h6" stroke-width="2" stroke-linecap="round"></path>
+                    </svg>
+                </span>
+                <span class="header-timer-text" id="headerTimerText">No active timers</span>
+            </div>
             <div class="status-badge">
                 <div class="status-dot" id="statusDot"></div>
                 <span id="statusText">Ready</span>
@@ -987,6 +1109,34 @@
 
         <!-- Main Content -->
         <main class="main-content">
+            <aside class="toolbox" aria-label="Toolbox">
+                <button class="action-btn" id="lightsToggle" type="button" onclick="toggleLights()" aria-pressed="false">
+                    <span class="action-icon" id="lightsIcon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5z" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        </svg>
+                    </span>
+                    <span class="action-label" id="lightsLabel">Lights Off</span>
+                </button>
+                <button class="action-btn" type="button" onclick="openTimerModal()">
+                    <span class="action-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24">
+                            <circle cx="12" cy="13" r="8" fill="none" stroke-width="2"></circle>
+                            <path d="M12 13V9" stroke-width="2" stroke-linecap="round"></path>
+                            <path d="M9 2h6" stroke-width="2" stroke-linecap="round"></path>
+                        </svg>
+                    </span>
+                    <span class="action-label">Set Timer</span>
+                </button>
+                <button class="action-btn" type="button" onclick="stopMusic()">
+                    <span class="action-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24">
+                            <rect x="7" y="7" width="10" height="10" fill="currentColor"></rect>
+                        </svg>
+                    </span>
+                    <span class="action-label">Stop Audio</span>
+                </button>
+            </aside>
             <!-- Tool Panel -->
             <section class="recipe-panel tool-panel" id="toolPanel">
                 <div class="panel-header">
@@ -1051,45 +1201,6 @@
             </div>
         </main>
 
-        <!-- Quick Actions -->
-        <nav class="quick-actions">
-            <button class="action-btn" onclick="toggleLights(true)">
-                <span class="action-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
-                        <path d="M9 21h6" stroke-width="2" stroke-linecap="round"></path>
-                        <path d="M10 17h4" stroke-width="2" stroke-linecap="round"></path>
-                        <path d="M12 3a6 6 0 0 0-3.5 10.9c.7.5 1.2 1.3 1.4 2.1h4.2c.2-.8.7-1.6 1.4-2.1A6 6 0 0 0 12 3z" fill="none" stroke-width="2"></path>
-                    </svg>
-                </span>
-                <span class="action-label">Lights On</span>
-            </button>
-            <button class="action-btn" onclick="toggleLights(false)">
-                <span class="action-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
-                        <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5z" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                    </svg>
-                </span>
-                <span class="action-label">Lights Off</span>
-            </button>
-            <button class="action-btn" onclick="openTimerModal()">
-                <span class="action-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
-                        <circle cx="12" cy="13" r="8" fill="none" stroke-width="2"></circle>
-                        <path d="M12 13V9" stroke-width="2" stroke-linecap="round"></path>
-                        <path d="M9 2h6" stroke-width="2" stroke-linecap="round"></path>
-                    </svg>
-                </span>
-                <span class="action-label">Set Timer</span>
-            </button>
-            <button class="action-btn" onclick="stopMusic()">
-                <span class="action-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
-                        <rect x="7" y="7" width="10" height="10" fill="currentColor"></rect>
-                    </svg>
-                </span>
-                <span class="action-label">Stop Audio</span>
-            </button>
-        </nav>
     </div>
 
     <!-- Timer Modal -->
@@ -1135,11 +1246,17 @@
         let currentState = 'idle';
         let currentRecipe = null;
         let wakewordTimeoutId = null;
+        let lightsOn = false;
         const toolMetaEl = document.getElementById('toolMeta');
         const timersPanelEl = document.getElementById('timersPanel');
         const timersCountEl = document.getElementById('timersCount');
         const sidePanelEl = document.querySelector('.side-panel');
         const statusBadgeEl = document.querySelector('.status-badge');
+        const headerTimerEl = document.getElementById('headerTimer');
+        const headerTimerTextEl = document.getElementById('headerTimerText');
+        const lightsToggleEl = document.getElementById('lightsToggle');
+        const lightsLabelEl = document.getElementById('lightsLabel');
+        const lightsIconEl = document.getElementById('lightsIcon');
 
         // Connect to WebSocket
         function connect() {
@@ -1201,6 +1318,12 @@
                 case 'tool_call':
                     if (event.data.origin !== 'ui') {
                         addToolMessage(event.data.tool_name, event.data.arguments);
+                    }
+                    if (event.data.tool_name === 'control_home_lighting') {
+                        const args = event.data.arguments || {};
+                        if (typeof args.brightness === 'number') {
+                            setLightsState(args.brightness > 0, { skipCommand: true });
+                        }
                     }
                     break;
                 case 'tool_result':
@@ -1435,6 +1558,7 @@
             const icons = {
                 tool: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 7l3 3m-7 7l-3 3m2-14l2 2-6 6-2-2 6-6zm8-1a4 4 0 0 1-5 5l-8 8-3-3 8-8a4 4 0 0 1 5-5z" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
                 light: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21h6" stroke-width="2" stroke-linecap="round"></path><path d="M10 17h4" stroke-width="2" stroke-linecap="round"></path><path d="M12 3a6 6 0 0 0-3.5 10.9c.7.5 1.2 1.3 1.4 2.1h4.2c.2-.8.7-1.6 1.4-2.1A6 6 0 0 0 12 3z" fill="none" stroke-width="2"></path></svg>',
+                moon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5z" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
                 timer: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8" fill="none" stroke-width="2"></circle><path d="M12 13V9" stroke-width="2" stroke-linecap="round"></path><path d="M9 2h6" stroke-width="2" stroke-linecap="round"></path></svg>',
                 recipe: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7c5-3 13-3 18 0l-9 14L3 7z" fill="none" stroke-width="2" stroke-linejoin="round"></path><circle cx="10" cy="12" r="1" fill="currentColor"></circle><circle cx="14" cy="10" r="1" fill="currentColor"></circle></svg>',
                 music: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18a2 2 0 1 1-2-2 2 2 0 0 1 2 2zm8-11v9a2 2 0 1 1-2-2 2 2 0 0 1 2 2v-7l-8 2v5a2 2 0 1 1-2-2 2 2 0 0 1 2 2V6l10-3z" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
@@ -1568,6 +1692,7 @@
                         <div class="no-timers-hint">Say "Set a timer for 5 minutes"</div>
                     </div>
                 `;
+                updatePrimaryTimer();
                 return;
             }
 
@@ -1593,6 +1718,33 @@
                     </div>
                 `;
             }).join('');
+
+            updatePrimaryTimer();
+        }
+
+        function updatePrimaryTimer() {
+            if (!headerTimerEl || !headerTimerTextEl) {
+                return;
+            }
+
+            const activeTimers = Object.values(timers).filter(timer => (
+                !timer.complete && timer.remaining_seconds > 0
+            ));
+
+            if (!activeTimers.length) {
+                headerTimerEl.classList.add('is-hidden');
+                headerTimerTextEl.textContent = 'No active timers';
+                return;
+            }
+
+            activeTimers.sort((a, b) => a.remaining_seconds - b.remaining_seconds);
+            const nextTimer = activeTimers[0];
+            const label = nextTimer.name
+                ? `${nextTimer.name} - ${formatTime(nextTimer.remaining_seconds)}`
+                : formatTime(nextTimer.remaining_seconds);
+
+            headerTimerTextEl.textContent = label;
+            headerTimerEl.classList.remove('is-hidden');
         }
 
         function formatTime(seconds) {
@@ -1617,8 +1769,30 @@
         }, 1000);
 
         // Quick Actions
-        function toggleLights(on) {
-            sendCommand('control_home_lighting', { device_id: 999, brightness: on ? 100 : 0 });
+        function updateLightsToggle() {
+            if (lightsToggleEl) {
+                lightsToggleEl.classList.toggle('active', lightsOn);
+                lightsToggleEl.setAttribute('aria-pressed', lightsOn ? 'true' : 'false');
+            }
+            if (lightsLabelEl) {
+                lightsLabelEl.textContent = lightsOn ? 'Lights On' : 'Lights Off';
+            }
+            if (lightsIconEl) {
+                lightsIconEl.innerHTML = lightsOn ? iconSvg('light') : iconSvg('moon');
+            }
+        }
+
+        function setLightsState(nextState, options = {}) {
+            const { skipCommand = false } = options;
+            lightsOn = Boolean(nextState);
+            updateLightsToggle();
+            if (!skipCommand) {
+                sendCommand('control_home_lighting', { device_id: 999, brightness: lightsOn ? 100 : 0 });
+            }
+        }
+
+        function toggleLights() {
+            setLightsState(!lightsOn);
         }
 
         function stopMusic() {
@@ -1676,6 +1850,8 @@
         }
 
         // Initialize
+        updateLightsToggle();
+        updatePrimaryTimer();
         connect();
     </script>
 </body>
