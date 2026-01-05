@@ -85,13 +85,16 @@ def _resolve_wakeword_models(models: list[str], repo_root: str) -> list[str]:
     return resolved
 
 class OpenWakeWordDetector:
-    def __init__(self, wakeword_models: list[str], threshold: float):
+    def __init__(self, wakeword_models: list[str], threshold: float, inference_framework: str):
         if OpenWakeWordModel is None:
             raise RuntimeError(
                 "openwakeword is not installed. Install it with `pip install openwakeword`."
             )
         self.threshold = threshold
-        self.model = OpenWakeWordModel(wakeword_models=wakeword_models)
+        self.model = OpenWakeWordModel(
+            wakeword_models=wakeword_models,
+            inference_framework=inference_framework,
+        )
 
     def process(self, pcm: np.ndarray):
         scores = self.model.predict(pcm)
@@ -777,8 +780,24 @@ if WAKEWORD_SAMPLE_RATE != 16000:
     )
 
 wakeword_models = _resolve_wakeword_models(WAKEWORD_MODELS, REPO_ROOT)
+inference_framework = os.getenv("WAKEWORD_INFERENCE_FRAMEWORK")
+if not inference_framework:
+    if wakeword_models and all(path.lower().endswith(".onnx") for path in wakeword_models):
+        inference_framework = "onnx"
+    elif wakeword_models and all(path.lower().endswith(".tflite") for path in wakeword_models):
+        inference_framework = "tflite"
+    else:
+        inference_framework = "onnx"
+        print(
+            "⚠️  Mixed or unknown wakeword model extensions detected; "
+            "defaulting WAKEWORD_INFERENCE_FRAMEWORK=onnx"
+        )
 try:
-    wakeword_detector = OpenWakeWordDetector(wakeword_models, WAKEWORD_THRESHOLD)
+    wakeword_detector = OpenWakeWordDetector(
+        wakeword_models,
+        WAKEWORD_THRESHOLD,
+        inference_framework,
+    )
 except Exception as exc:
     raise SystemExit(f"Wakeword initialization failed: {exc}")
 
@@ -919,4 +938,3 @@ except KeyboardInterrupt:
         audio_stream.close()
     if pa is not None:
         pa.terminate()
-
