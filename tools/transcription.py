@@ -186,6 +186,10 @@ def create_transcription_service() -> TranscriptionService:
     
     # Local fallback configuration
     default_whisper_path = os.path.join(repo_root, "whisper.cpp", "build", "bin", "whisper-cli")
+    if os.name == "nt":
+        exe_path = f"{default_whisper_path}.exe"
+        if os.path.exists(exe_path):
+            default_whisper_path = exe_path
     default_model_path = os.path.join(repo_root, "whisper.cpp", "models", "ggml-tiny.bin")
     
     def _resolve_path(env_value: Optional[str], fallback: str) -> str:

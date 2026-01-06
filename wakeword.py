@@ -12,6 +12,7 @@ import time
 import numpy as np
 import sounddevice as sd
 import torch
+import tempfile
 from google import genai
 from google.genai import types
 from piper.voice import PiperVoice
@@ -913,7 +914,8 @@ try:
             if is_silence_timeout or is_max_length or is_no_speech_timeout:
                 print(f"🛑 Capture complete. Frames: {len(current_command_frames)}")
 
-                temp_audio_path = f"/tmp/cmd_{int(time.time())}.wav"
+                temp_dir = tempfile.gettempdir()
+                temp_audio_path = os.path.join(temp_dir, f"cmd_{int(time.time())}.wav")
                 with wave.open(temp_audio_path, 'wb') as wf:
                     wf.setnchannels(1)
                     wf.setsampwidth(pa.get_sample_size(pyaudio.paInt16))
