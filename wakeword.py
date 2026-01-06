@@ -28,8 +28,10 @@ from core.event_bus import (
 )
 from dotenv import load_dotenv
 try:
+    import openwakeword
     from openwakeword.model import Model as OpenWakeWordModel
 except Exception:
+    openwakeword = None
     OpenWakeWordModel = None
 
 try:
@@ -47,6 +49,22 @@ if AUTO_ROUTE_BT_SINK:
         print(f"🔊 {route_to_bluetooth(BT_AUDIO_DEVICE_NAME)}")
     except Exception as e:
         print(f"⚠️  Bluetooth routing failed: {e}")
+
+def _ensure_openwakeword_models() -> None:
+    """Download OpenWakeWord resources if they are missing."""
+    if openwakeword is None:
+        return
+    resources_dir = os.path.join(os.path.dirname(openwakeword.__file__), "resources", "models")
+    melspec_onnx = os.path.join(resources_dir, "melspectrogram.onnx")
+    if os.path.exists(melspec_onnx):
+        return
+    try:
+        from openwakeword.utils import download_models
+        print("⚠️  OpenWakeWord model resources missing; downloading...")
+        download_models(target_directory=resources_dir)
+        print("✅ OpenWakeWord resources downloaded")
+    except Exception as exc:
+        print(f"⚠️  Failed to download OpenWakeWord resources: {exc}")
 
 def _get_env_float(name: str, default: float) -> float:
     """Parse a float env var with a safe fallback."""
@@ -431,15 +449,15 @@ class PersistentAudioOutput:
 
 # Global persistent audio output (initialized after piper_voice is loaded)
 tts_audio_output = None
+output_device = os.getenv("TTS_OUTPUT_DEVICE")
+output_channels = _get_env_int("TTS_OUTPUT_CHANNELS", 1)
+allow_stereo_fallback = os.getenv("TTS_OUTPUT_ALLOW_STEREO_FALLBACK", "true").lower() == "true"
+if output_device is not None:
+    try:
+        output_device = int(output_device)
+    except ValueError:
+        pass
 if piper_voice:
-    output_device = os.getenv("TTS_OUTPUT_DEVICE")
-    output_channels = _get_env_int("TTS_OUTPUT_CHANNELS", 1)
-    allow_stereo_fallback = os.getenv("TTS_OUTPUT_ALLOW_STEREO_FALLBACK", "true").lower() == "true"
-    if output_device is not None:
-        try:
-            output_device = int(output_device)
-        except ValueError:
-            pass
     tts_audio_output = PersistentAudioOutput(
         sample_rate=piper_voice.config.sample_rate,
         channels=output_channels,
@@ -466,6 +484,14 @@ if USE_GPU_TTS:
         stream_chunk_bytes=XTTS_STREAM_READ_CHUNK_BYTES
     )
     print(f"🔊 GPU TTS enabled: {XTTS_SERVER_URL}")
+    if tts_audio_output is None:
+        gpu_sample_rate = _get_env_int("TTS_OUTPUT_SAMPLE_RATE", 24000)
+        tts_audio_output = PersistentAudioOutput(
+            sample_rate=gpu_sample_rate,
+            channels=output_channels,
+            device=output_device,
+            allow_stereo_fallback=allow_stereo_fallback
+        )
 else:
     print("🔊 Using local Piper TTS only")
 
@@ -793,6 +819,7 @@ if not inference_framework:
             "⚠️  Mixed or unknown wakeword model extensions detected; "
             "defaulting WAKEWORD_INFERENCE_FRAMEWORK=onnx"
         )
+_ensure_openwakeword_models()
 try:
     wakeword_detector = OpenWakeWordDetector(
         wakeword_models,
