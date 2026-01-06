@@ -295,9 +295,9 @@ def stop_music():
                 text=True
             )
             
-            # Look for pyttsx3 or run_assistant.py processes
+            # Look for pyttsx3 or wakeword.py processes
             for line in ps_result.stdout.split('\n'):
-                if 'pyttsx3' in line or 'run_assistant.py' in line:
+                if 'pyttsx3' in line or 'wakeword.py' in line:
                     # Extract PID (second column)
                     parts = line.split()
                     if len(parts) > 1:

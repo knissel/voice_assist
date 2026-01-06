@@ -96,9 +96,6 @@ pip install -r requirements.txt
 ```bash
 # Wake word mode
 python wakeword.py
-
-# Push-to-talk mode
-python run_assistant.py
 ```
 
 ## How It Works

@@ -142,16 +142,6 @@ Say the wake word, then speak your command. The assistant will:
 
 **Recommended for Raspberry Pi** - hands-free operation without keyboard
 
-### Push-to-Talk Mode
-
-Run the push-to-talk assistant:
-
-```bash
-python run_assistant.py
-```
-
-- Press **SPACE** to record a command
-- Press **ESC** to quit
 
 ## Supported Commands
 
@@ -200,7 +190,6 @@ voice_assist/
 ├── .gitignore             # Git ignore rules
 ├── requirements.txt       # Python dependencies
 ├── README.md             # This file
-├── run_assistant.py      # Push-to-talk mode (main entry point)
 ├── wakeword.py           # Wake word detection mode (main entry point)
 ├── main.py               # Basic example script
 ├── docs/                 # Documentation

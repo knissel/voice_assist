@@ -191,7 +191,7 @@ After=network.target sound.target
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/voice_assist
-ExecStart=/usr/bin/python3 /home/pi/voice_assist/run_assistant.py
+ExecStart=/usr/bin/python3 /home/pi/voice_assist/wakeword.py
 Restart=always
 RestartSec=10
 

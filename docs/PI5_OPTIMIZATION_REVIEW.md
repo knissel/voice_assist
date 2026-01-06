@@ -70,7 +70,6 @@ The codebase is a functional voice assistant with good foundations (Porcupine wa
 | File | Purpose | Lines | Issues |
 |------|---------|-------|--------|
 | `wakeword.py` | Main entry, wakeword loop | 263 | Monolithic, no state machine |
-| `run_assistant.py` | Push-to-talk mode | 267 | Duplicates wakeword.py logic |
 | `tools/transcription.py` | Remote/local ASR | 154 | Sync HTTP, no streaming |
 | `tools/control4_tool.py` | Smart home | 62 | Reconnects every call |
 | `tools/registry.py` | Tool dispatch | 298 | Good abstraction |
@@ -275,27 +274,22 @@ def load_vad_model():
     return model
 ```
 
-#### 7. Duplicate Code Between wakeword.py and run_assistant.py
-**Problem:** Recording, VAD, transcription, LLM, TTS logic duplicated.
-
-**Fix:** Extract to shared `core/pipeline.py` module.
-
 ### 🟢 Quick Wins
 
-#### 8. Add `exception_on_overflow=False` Consistently
+#### 7. Add `exception_on_overflow=False` Consistently
 Already done in some places, ensure everywhere:
 ```python
 data = stream.read(CHUNK, exception_on_overflow=False)
 ```
 
-#### 9. Reduce Torch Memory Usage
+#### 8. Reduce Torch Memory Usage
 ```python
 # Add at startup
 torch.set_num_threads(2)  # Limit CPU threads on Pi
 torch.set_grad_enabled(False)  # Disable autograd
 ```
 
-#### 10. Pre-warm Models at Startup
+#### 9. Pre-warm Models at Startup
 ```python
 # After loading Piper
 dummy_audio = list(piper_voice.synthesize("Ready"))  # Warm JIT
@@ -541,7 +535,6 @@ voice_assist/
 │   ├── server.py             # FastAPI + WebSocket
 │   └── routes.py             # REST endpoints
 ├── wakeword.py               # Entry point (thin wrapper)
-├── run_assistant.py          # Push-to-talk entry
 └── requirements.txt
 ```
 
