@@ -24,7 +24,8 @@ RUN pip3 install --no-cache-dir torch torchvision torchaudio --index-url https:/
 RUN pip3 install --no-cache-dir -r requirements_gpu_server.txt
 RUN pip3 install --no-cache-dir fastapi uvicorn python-dotenv google-genai requests
 
-# Copy source code
+# Copy source code and config
+COPY .env .
 COPY src/ .
 
 # Ensure server.py knows about the .env
