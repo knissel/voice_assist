@@ -25,12 +25,12 @@ services:
       context: ./services/edge
       dockerfile: Dockerfile
     container_name: voice-assistant-edge
-    devices:
-      - "/dev/snd:/dev/snd"
+    # devices:
+    #   - "/dev/snd:/dev/snd"
     environment:
       - COMPUTE_SERVER_URL=http://compute:8000
-    volumes:
-      - ./services/edge/src:/app
-      - .env:/app/.env
+    # volumes:
+    #   - ./services/edge/src:/app
+    #   - .env:/app/.env
     # network_mode: host # Often needed for ALSA/Pulseaudio in Docker
     restart: unless-stopped
