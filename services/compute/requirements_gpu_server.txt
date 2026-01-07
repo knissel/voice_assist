@@ -7,6 +7,7 @@ numpy
 scipy
 torch
 torchaudio
+httpx
 # Additional Tools
 pyControl4
 aiohttp>=3.9.0,<3.10.0

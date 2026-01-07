@@ -185,30 +185,30 @@ def _synthesize_tts_full(response_text: str) -> Optional[bytes]:
         return buffer.getvalue()
     return None
 
-def _synthesize_tts_stream(response_text: str):
-    """Generator that yields TTS audio chunks (raw PCM int16 at 24kHz)."""
-    import requests
+async def _synthesize_tts_stream_async(response_text: str):
+    """Async generator that yields TTS audio chunks (raw PCM int16)."""
+    import httpx
     if not response_text or not gpu_tts_client:
         return
     clean_text = preprocess_for_tts(response_text)
     try:
-        response = requests.post(
-            f"{XTTS_SERVER_URL}/synthesize_stream",
-            json={"text": clean_text, "language": "en", "stream_chunk_size": 15},
-            timeout=(10, 60),
-            stream=True
-        )
-        if response.status_code != 200:
-            logger.warning(f"TTS stream error: {response.status_code}")
-            return
-        sample_rate = int(response.headers.get('X-Sample-Rate', 24000))
-        chunk_count = 0
-        for raw_chunk in response.iter_content(chunk_size=4800):  # ~100ms at 24kHz
-            if raw_chunk:
-                chunk_count += 1
-                if chunk_count == 1:
-                    logger.info(f"TTS stream: first chunk received")
-                yield raw_chunk, sample_rate
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=60.0)) as client:
+            async with client.stream(
+                "POST",
+                f"{XTTS_SERVER_URL}/synthesize_stream",
+                json={"text": clean_text, "language": "en", "stream_chunk_size": 15}
+            ) as response:
+                if response.status_code != 200:
+                    logger.warning(f"TTS stream error: {response.status_code}")
+                    return
+                sample_rate = int(response.headers.get('X-Sample-Rate', 24000))
+                chunk_count = 0
+                async for raw_chunk in response.aiter_bytes(chunk_size=4800):  # ~100ms at 24kHz
+                    if raw_chunk:
+                        chunk_count += 1
+                        if chunk_count == 1:
+                            logger.info(f"TTS stream: first chunk received")
+                        yield raw_chunk, sample_rate
     except Exception as e:
         logger.error(f"TTS stream error: {e}")
 
@@ -386,22 +386,27 @@ async def websocket_audio_endpoint(websocket: WebSocket):
                         response_text = await asyncio.to_thread(_process_text_llm_only, final_text)
                         llm_latency_ms = int((time.time() - response_start) * 1000)
                         
+                        # Determine if we'll stream audio
+                        will_stream_audio = bool(response_text and gpu_tts_client)
+                        
                         # Send text response immediately (user sees feedback faster)
                         await send_json({
                             "type": "assistant_response",
                             "session_id": session_id,
                             "response_text": response_text,
-                            "audio_base64": None,  # Audio will come as streamed chunks
+                            "audio_base64": None,
                             "latency_ms": llm_latency_ms,
-                            "audio_streaming": True
+                            "audio_streaming": will_stream_audio
                         })
                         
-                        # Stream TTS audio chunks
-                        if response_text and gpu_tts_client:
+                        # Stream TTS audio chunks (if applicable)
+                        if will_stream_audio:
                             chunk_count = 0
+                            actual_sample_rate = 24000  # Default
                             tts_start = time.time()
                             try:
-                                for chunk_data, sample_rate in _synthesize_tts_stream(response_text):
+                                async for chunk_data, sample_rate in _synthesize_tts_stream_async(response_text):
+                                    actual_sample_rate = sample_rate
                                     chunk_count += 1
                                     # Send raw audio chunk as binary
                                     await websocket.send_bytes(chunk_data)
@@ -411,7 +416,7 @@ async def websocket_audio_endpoint(websocket: WebSocket):
                                     "type": "audio_stream_end",
                                     "session_id": session_id,
                                     "chunks_sent": chunk_count,
-                                    "sample_rate": 24000,
+                                    "sample_rate": actual_sample_rate,
                                     "tts_latency_ms": int((time.time() - tts_start) * 1000)
                                 })
                             except Exception as tts_err:
