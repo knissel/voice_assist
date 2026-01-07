@@ -123,6 +123,7 @@ class EdgeAssistant:
         self._stream_session_id = None
         self._speech_end_time = None
         self._processing_done = False
+        self._current_frames = None
 
     def _setup_speaker(self):
         # We'll use sounddevice for persistent output
@@ -194,6 +195,7 @@ class EdgeAssistant:
         self._stream_task = None
         self._stream_session_id = None
         self._speech_end_time = None
+        self._current_frames = None
         update_dashboard_state("status", "listening")
         print("[LISTEN] Ready for next wake word...")
         resume_media()
@@ -204,8 +206,35 @@ class EdgeAssistant:
         await self._stream_queue.put(chunk)
 
     async def _receive_compute(self, websocket, done_event: asyncio.Event):
+        """Receive and process messages from compute server."""
+        audio_chunks = []  # Buffer for streaming audio
+        sample_rate = 24000  # Default XTTS sample rate
+        is_streaming_audio = False
+        
         try:
             async for message in websocket:
+                # Handle binary audio chunks
+                if isinstance(message, bytes):
+                    if is_streaming_audio:
+                        audio_chunks.append(message)
+                        # Play chunk immediately for low latency
+                        try:
+                            audio_np = np.frombuffer(message, dtype=np.int16)
+                            # Resample from 24kHz to output sample rate if needed
+                            if self.sample_rate != sample_rate:
+                                from scipy.signal import resample_poly
+                                from math import gcd
+                                g = gcd(sample_rate, self.sample_rate)
+                                audio_np = resample_poly(audio_np.astype(np.float32), 
+                                                        self.sample_rate // g, 
+                                                        sample_rate // g)
+                                audio_np = np.clip(audio_np, -32768, 32767).astype(np.int16)
+                            self.out_stream.write(audio_np)
+                        except Exception as e:
+                            print(f"[WARN] Audio chunk playback error: {e}")
+                    continue
+                
+                # Handle JSON messages
                 try:
                     data = json.loads(message)
                 except json.JSONDecodeError:
@@ -231,10 +260,23 @@ class EdgeAssistant:
                     response_text = data.get("response_text", "")
                     emit_assistant_text(self.bus, response_text, is_partial=False)
                     update_dashboard_state("last_response", response_text)
-                    audio_b64 = data.get("audio_base64")
-                    if audio_b64:
-                        audio_bytes = base64.b64decode(audio_b64)
+                    
+                    # Check if audio is streaming or base64 encoded
+                    if data.get("audio_streaming"):
+                        is_streaming_audio = True
+                        print(f"[TTS] Streaming audio...")
+                    elif data.get("audio_base64"):
+                        # Fallback to base64 audio (non-streaming)
+                        audio_bytes = base64.b64decode(data["audio_base64"])
                         self.play_audio(audio_bytes)
+                        done_event.set()
+                    elif not data.get("audio_streaming"):
+                        # No audio at all
+                        done_event.set()
+                elif msg_type == "audio_stream_end":
+                    chunks_sent = data.get("chunks_sent", 0)
+                    tts_latency = data.get("tts_latency_ms", 0)
+                    print(f"[TTS] Stream complete: {chunks_sent} chunks, {tts_latency}ms")
                     done_event.set()
                 elif msg_type == "error":
                     print(f"[ERROR] Compute WS error: {data.get('error')}")
@@ -243,13 +285,15 @@ class EdgeAssistant:
             print(f"[ERROR] Compute WS receive failed: {exc}")
             done_event.set()
 
-    async def _stream_to_compute(self, frames_for_fallback):
+    async def _stream_to_compute(self):
         session_id = self._stream_session_id or str(uuid.uuid4())[:8]
         self._stream_session_id = session_id
         done_event = asyncio.Event()
 
+        print(f"[WS] Connecting to {COMPUTE_WS_URL}...")
         try:
             async with websockets.connect(COMPUTE_WS_URL, max_size=None, ping_interval=20) as websocket:
+                print(f"[WS] Connected! Sending start message...")
                 await websocket.send(json.dumps({
                     "type": "start",
                     "session_id": session_id,
@@ -262,12 +306,16 @@ class EdgeAssistant:
 
                 receiver_task = asyncio.create_task(self._receive_compute(websocket, done_event))
 
+                chunks_sent = 0
                 while True:
                     chunk = await self._stream_queue.get()
                     if chunk is None:
+                        print(f"[WS] Queue signaled end. Sent {chunks_sent} chunks.")
                         break
                     await websocket.send(chunk)
+                    chunks_sent += 1
 
+                print(f"[WS] Sending stop message...")
                 stop_payload = {
                     "type": "stop",
                     "session_id": session_id,
@@ -275,8 +323,10 @@ class EdgeAssistant:
                 }
                 await websocket.send(json.dumps(stop_payload))
 
+                print(f"[WS] Waiting for response...")
                 try:
                     await asyncio.wait_for(done_event.wait(), timeout=40)
+                    print(f"[WS] Response received!")
                 except asyncio.TimeoutError:
                     print("[WARN] Timed out waiting for compute response")
                 finally:
@@ -286,7 +336,12 @@ class EdgeAssistant:
 
         except Exception as exc:
             print(f"[ERROR] WebSocket stream failed, falling back to HTTP: {exc}")
-            await asyncio.to_thread(self._process_on_compute, frames_for_fallback)
+            # Use self._current_frames which has the actual recorded audio
+            if self._current_frames:
+                print(f"[HTTP-FALLBACK] Sending {len(self._current_frames)} frames via HTTP...")
+                await asyncio.to_thread(self._process_on_compute, list(self._current_frames))
+            else:
+                print("[ERROR] No frames available for HTTP fallback")
         finally:
             self._finish_processing()
 
@@ -336,8 +391,10 @@ class EdgeAssistant:
                         self._processing_done = False
                         self._speech_end_time = None
                         self._stream_queue = asyncio.Queue(maxsize=STREAM_QUEUE_MAX)
+                        # Store reference to frames for potential HTTP fallback
+                        self._current_frames = current_command_frames
                         self._stream_task = asyncio.create_task(
-                            self._stream_to_compute(current_command_frames)
+                            self._stream_to_compute()
                         )
 
                 elif self.state == AudioRecorderState.RECORDING:
@@ -353,37 +410,47 @@ class EdgeAssistant:
                     if prob >= 0.5:
                         if not speech_detected:
                             speech_detected = True
-                            if stream_pre_roll:
-                                for chunk in stream_pre_roll:
-                                    await self._enqueue_audio_chunk(chunk)
-                                stream_pre_roll.clear()
+                            print(f"[VAD] Speech detected")
                         silence_counter = 0
                     else:
                         if speech_detected:
                             silence_counter += 1
 
+                    # Always send audio chunks during recording (don't gate on speech_detected)
+                    # The server's VAD will also filter, but we want to capture everything
                     for offset in range(0, len(pcm_bytes), STREAM_CHUNK_BYTES):
                         chunk = pcm_bytes[offset:offset + STREAM_CHUNK_BYTES]
-                        if speech_detected:
-                            await self._enqueue_audio_chunk(chunk)
-                        else:
-                            stream_pre_roll.append(chunk)
+                        await self._enqueue_audio_chunk(chunk)
                     
-                    # End recording conditions
-                    if (speech_detected and silence_counter > 10) or len(current_command_frames) > 150:
+                    # End recording conditions - require minimum frames (~1 sec) before stopping
+                    min_frames = 12  # ~1 second of audio at 80ms per frame
+                    has_enough_audio = len(current_command_frames) >= min_frames
+                    if (has_enough_audio and speech_detected and silence_counter > 10) or len(current_command_frames) > 150:
                         print("[STOP] Recording finished")
                         update_dashboard_state("status", "processing")
                         self.state = AudioRecorderState.PROCESSING
                         self.is_processing = True
                         self._speech_end_time = time.time()
                         
+                        # Signal end of audio stream
                         if self._stream_queue:
                             await self._stream_queue.put(None)
                         
+                        # Wait for stream task to complete before going back to listening
+                        if self._stream_task:
+                            try:
+                                await asyncio.wait_for(self._stream_task, timeout=45)
+                            except asyncio.TimeoutError:
+                                print("[WARN] Stream task timed out")
+                            except Exception as e:
+                                print(f"[ERROR] Stream task error: {e}")
+                        
+                        # Now safe to reset state
                         self.state = AudioRecorderState.LISTENING
                         current_command_frames = []
                         pre_roll_buffer.clear()
                         self.wakeword_detector.reset()
+                        self._current_frames = None
 
                 await asyncio.sleep(0.01)
 
