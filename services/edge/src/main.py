@@ -18,6 +18,9 @@ import tempfile
 from piper.voice import PiperVoice
 from dotenv import load_dotenv
 
+# Load environment variables FIRST before any internal imports that read them
+load_dotenv()
+
 # Internal imports (relative to services/edge/src/)
 from core.conversation import parse_clear_phrases
 from core.event_bus import (
@@ -25,13 +28,12 @@ from core.event_bus import (
     emit_assistant_text, emit_tool_call, emit_tool_result, emit_error
 )
 from tools.audio import pause_media, resume_media
+from dashboard import start_dashboard_thread, update_state as update_dashboard_state
 
 try:
     from openwakeword.model import Model as OpenWakeWordModel
 except Exception:
     OpenWakeWordModel = None
-
-load_dotenv()
 
 # === CONFIGURATION ===
 COMPUTE_SERVER_URL = os.getenv("COMPUTE_SERVER_URL", "http://localhost:8000")
@@ -105,7 +107,7 @@ class EdgeAssistant:
             raise RuntimeError("openwakeword not installed")
         
         resolved_models = _resolve_wakeword_models(WAKEWORD_MODELS, self.repo_root)
-        print(f"📦 Loading wakeword models: {resolved_models}")
+        print(f"[INFO] Loading wakeword models: {resolved_models}")
         
         self.wakeword_detector = OpenWakeWordModel(
             wakeword_models=resolved_models,
@@ -140,7 +142,8 @@ class EdgeAssistant:
         os.remove(tmp_path)
 
     async def run(self):
-        print("👂 Edge Assistant Listening...")
+        print("[LISTEN] Edge Assistant Listening...")
+        update_dashboard_state("status", "listening")
         pre_roll_buffer = collections.deque(maxlen=20) # ~1.5s
         current_command_frames = []
         speech_detected = False
@@ -160,24 +163,34 @@ class EdgeAssistant:
                     found = False
                     for name, score in scores.items():
                         if score >= WAKEWORD_THRESHOLD:
-                            print(f"🔔 Wake Word: {name}")
+                            print(f"[WAKE] Wake Word: {name}")
                             found = True
                             break
                     
                     if found and not self.is_processing:
                         pause_media()
                         emit_state_changed(self.bus, "idle", "listening")
+                        update_dashboard_state("status", "recording")
+                        
+                        # Clear pre-roll buffer - don't include wake word audio
+                        pre_roll_buffer.clear()
+                        
+                        # Small delay to let wake word audio finish (prevents "Oogway" in transcript)
+                        await asyncio.sleep(0.3)
+                        
                         self.state = AudioRecorderState.RECORDING
-                        current_command_frames = list(pre_roll_buffer)
+                        current_command_frames = []  # Start fresh, no pre-roll
                         speech_detected = False
                         silence_counter = 0
 
                 elif self.state == AudioRecorderState.RECORDING:
                     current_command_frames.append(pcm_bytes)
                     
-                    # VAD Check
+                    # VAD Check - Silero VAD needs exactly 512 samples at 16kHz
                     audio_int16 = np.frombuffer(pcm_bytes, dtype=np.int16)
-                    vad_tensor = torch.from_numpy(audio_int16.astype(np.float32) * VAD_NORMALIZE)
+                    # Take only the first 512 samples for VAD (Silero requirement)
+                    vad_chunk = audio_int16[:512] if len(audio_int16) >= 512 else audio_int16
+                    vad_tensor = torch.from_numpy(vad_chunk.astype(np.float32) * VAD_NORMALIZE)
                     prob = self.vad_model(vad_tensor, WAKEWORD_SAMPLE_RATE).item()
                     
                     if prob >= 0.5:
@@ -189,7 +202,8 @@ class EdgeAssistant:
                     
                     # End recording conditions
                     if (speech_detected and silence_counter > 10) or len(current_command_frames) > 150:
-                        print("🛑 Recording finished")
+                        print("[STOP] Recording finished")
+                        update_dashboard_state("status", "processing")
                         self.state = AudioRecorderState.PROCESSING
                         self.is_processing = True
                         
@@ -204,7 +218,7 @@ class EdgeAssistant:
                 await asyncio.sleep(0.01)
 
         except Exception as e:
-            print(f"❌ Error in loop: {e}")
+            print(f"[ERROR] Error in loop: {e}")
         finally:
             self.in_stream.stop_stream()
             self.in_stream.close()
@@ -222,13 +236,19 @@ class EdgeAssistant:
             buffer.seek(0)
             
             # 2. Send to Compute
-            print("🚀 Sending to Compute...")
+            print("[SEND] Sending to Compute...")
             files = {'audio': ('command.wav', buffer, 'audio/wav')}
             response = requests.post(f"{COMPUTE_SERVER_URL}/process", files=files, timeout=30)
             
             if response.status_code == 200:
                 data = response.json()
-                print(f"📝 Response: {data.get('response_text')}")
+                transcript = data.get('transcript', '')
+                response_text = data.get('response_text', '')
+                print(f"[RESPONSE] Response: {response_text}")
+                
+                # Update dashboard
+                update_dashboard_state("last_transcript", transcript)
+                update_dashboard_state("last_response", response_text)
                 
                 # 3. Handle Audio Playback
                 audio_b64 = data.get('audio_base64')
@@ -238,15 +258,20 @@ class EdgeAssistant:
                     self.play_audio(audio_bytes)
                 
             else:
-                print(f"❌ Compute Server Error: {response.text}")
+                print(f"[ERROR] Compute Server Error: {response.text}")
                 
         except Exception as e:
-            print(f"❌ Failed to process on compute: {e}")
+            print(f"[ERROR] Failed to process on compute: {e}")
         finally:
             self.is_processing = False
+            update_dashboard_state("status", "listening")
+            print("[LISTEN] Ready for next wake word...")
             resume_media()
 
 if __name__ == "__main__":
     import io
+    # Start the dashboard
+    start_dashboard_thread(port=5000)
+    
     assistant = EdgeAssistant()
     asyncio.run(assistant.run())

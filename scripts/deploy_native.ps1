@@ -3,18 +3,17 @@ param (
     [string]$EDGE_USER = "kenny"
 )
 
-Write-Host "📦 Syncing code to Edge ($EDGE_IP)..." -ForegroundColor Cyan
+Write-Host "[SYNC] Syncing code to Edge ($EDGE_IP)..." -ForegroundColor Cyan
 
-# Use SCP to copy the 'src' and requirements to the Mini PC folder
-# We'll put it in a folder called 'voice_assist_edge' in your home directory
-ssh $EDGE_USER@$EDGE_IP "powershell -Command 'New-Item -ItemType Directory -Force -Path `\"`$env:USERPROFILE\voice_assist_edge`\" '"
+# Create the destination directory on the remote machine
+$sshTarget = "$EDGE_USER@$EDGE_IP"
+ssh $sshTarget 'powershell -Command New-Item -ItemType Directory -Force -Path C:\Users\Kenny\voice_assist_edge'
 
 # Copy the src files and the .env
-scp -r services/edge/src/* "${EDGE_USER}@${EDGE_IP}:~/voice_assist_edge/"
-scp services/edge/.env "${EDGE_USER}@${EDGE_IP}:~/voice_assist_edge/"
+scp -r services/edge/src/* "${sshTarget}:C:/Users/Kenny/voice_assist_edge/"
+scp services/edge/.env "${sshTarget}:C:/Users/Kenny/voice_assist_edge/"
 
-Write-Host "🚀 Starting Edge Assistant natively..." -ForegroundColor Green
+Write-Host "[START] Starting Edge Assistant natively..." -ForegroundColor Green
 
-# Start the assistant remotely
-# We use --windowstyle normal so you can see the terminal if you're looking at the Mini PC monitor
-ssh $EDGE_USER@$EDGE_IP "cd ~/voice_assist_edge; python main.py"
+# Run the python script using the venv with unbuffered output (-u)
+ssh $sshTarget 'C:\Users\Kenny\voice_assist\venv\Scripts\python.exe -u C:\Users\Kenny\voice_assist_edge\main.py'
