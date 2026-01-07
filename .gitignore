@@ -1,6 +1,7 @@
-# Environment variables
 .env
 oauth.json
+**/.env
+**/.env.*
 
 # Python
 __pycache__/
@@ -24,13 +25,13 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual Environment
 .venv/
 .venv_kokoro/
 venv/
 ENV/
 env/
-tools/tmp_kokoro/
+**/tmp_kokoro/
+**/kokoro_pkg/
 
 # IDE
 .vscode/
@@ -55,9 +56,6 @@ gen-lang-client-0388656676-831ece806e29.json
 
 # Piper TTS models (too large for git)
 piper_models/
-
-# Cached models (generated locally)
-models/
 
 # Deployment config (user-specific)
 deploy.config

@@ -1,0 +1,14 @@
+# GPU Server Requirements
+faster-whisper
+flask
+TTS
+soundfile
+numpy
+scipy
+torch
+torchaudio
+# Additional Tools
+pyControl4
+aiohttp>=3.9.0,<3.10.0
+ytmusicapi
+python-multipart

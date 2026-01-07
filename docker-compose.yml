@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  compute:
+    build:
+      context: ./services/compute
+      dockerfile: Dockerfile
+    container_name: voice-assistant-compute
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    volumes:
+      - ./services/compute/src:/app
+      - .env:/app/.env
+    restart: unless-stopped
+
+  edge:
+    build:
+      context: ./services/edge
+      dockerfile: Dockerfile
+    container_name: voice-assistant-edge
+    # devices:
+    #   - "/dev/snd:/dev/snd"
+    environment:
+      - COMPUTE_SERVER_URL=http://compute:8000
+    # volumes:
+    #   - ./services/edge/src:/app
+    #   - .env:/app/.env
+    # network_mode: host # Often needed for ALSA/Pulseaudio in Docker
+    restart: unless-stopped

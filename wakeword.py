@@ -12,6 +12,7 @@ import time
 import numpy as np
 import sounddevice as sd
 import torch
+import tempfile
 from google import genai
 from google.genai import types
 from piper.voice import PiperVoice
@@ -27,8 +28,10 @@ from core.event_bus import (
 )
 from dotenv import load_dotenv
 try:
+    import openwakeword
     from openwakeword.model import Model as OpenWakeWordModel
 except Exception:
+    openwakeword = None
     OpenWakeWordModel = None
 
 try:
@@ -46,6 +49,22 @@ if AUTO_ROUTE_BT_SINK:
         print(f"🔊 {route_to_bluetooth(BT_AUDIO_DEVICE_NAME)}")
     except Exception as e:
         print(f"⚠️  Bluetooth routing failed: {e}")
+
+def _ensure_openwakeword_models() -> None:
+    """Download OpenWakeWord resources if they are missing."""
+    if openwakeword is None:
+        return
+    resources_dir = os.path.join(os.path.dirname(openwakeword.__file__), "resources", "models")
+    melspec_onnx = os.path.join(resources_dir, "melspectrogram.onnx")
+    if os.path.exists(melspec_onnx):
+        return
+    try:
+        from openwakeword.utils import download_models
+        print("⚠️  OpenWakeWord model resources missing; downloading...")
+        download_models(target_directory=resources_dir)
+        print("✅ OpenWakeWord resources downloaded")
+    except Exception as exc:
+        print(f"⚠️  Failed to download OpenWakeWord resources: {exc}")
 
 def _get_env_float(name: str, default: float) -> float:
     """Parse a float env var with a safe fallback."""
@@ -85,13 +104,16 @@ def _resolve_wakeword_models(models: list[str], repo_root: str) -> list[str]:
     return resolved
 
 class OpenWakeWordDetector:
-    def __init__(self, wakeword_models: list[str], threshold: float):
+    def __init__(self, wakeword_models: list[str], threshold: float, inference_framework: str):
         if OpenWakeWordModel is None:
             raise RuntimeError(
                 "openwakeword is not installed. Install it with `pip install openwakeword`."
             )
         self.threshold = threshold
-        self.model = OpenWakeWordModel(wakeword_models=wakeword_models)
+        self.model = OpenWakeWordModel(
+            wakeword_models=wakeword_models,
+            inference_framework=inference_framework,
+        )
 
     def process(self, pcm: np.ndarray):
         scores = self.model.predict(pcm)
@@ -427,15 +449,15 @@ class PersistentAudioOutput:
 
 # Global persistent audio output (initialized after piper_voice is loaded)
 tts_audio_output = None
+output_device = os.getenv("TTS_OUTPUT_DEVICE")
+output_channels = _get_env_int("TTS_OUTPUT_CHANNELS", 1)
+allow_stereo_fallback = os.getenv("TTS_OUTPUT_ALLOW_STEREO_FALLBACK", "true").lower() == "true"
+if output_device is not None:
+    try:
+        output_device = int(output_device)
+    except ValueError:
+        pass
 if piper_voice:
-    output_device = os.getenv("TTS_OUTPUT_DEVICE")
-    output_channels = _get_env_int("TTS_OUTPUT_CHANNELS", 1)
-    allow_stereo_fallback = os.getenv("TTS_OUTPUT_ALLOW_STEREO_FALLBACK", "true").lower() == "true"
-    if output_device is not None:
-        try:
-            output_device = int(output_device)
-        except ValueError:
-            pass
     tts_audio_output = PersistentAudioOutput(
         sample_rate=piper_voice.config.sample_rate,
         channels=output_channels,
@@ -462,6 +484,14 @@ if USE_GPU_TTS:
         stream_chunk_bytes=XTTS_STREAM_READ_CHUNK_BYTES
     )
     print(f"🔊 GPU TTS enabled: {XTTS_SERVER_URL}")
+    if tts_audio_output is None:
+        gpu_sample_rate = _get_env_int("TTS_OUTPUT_SAMPLE_RATE", 24000)
+        tts_audio_output = PersistentAudioOutput(
+            sample_rate=gpu_sample_rate,
+            channels=output_channels,
+            device=output_device,
+            allow_stereo_fallback=allow_stereo_fallback
+        )
 else:
     print("🔊 Using local Piper TTS only")
 
@@ -777,8 +807,25 @@ if WAKEWORD_SAMPLE_RATE != 16000:
     )
 
 wakeword_models = _resolve_wakeword_models(WAKEWORD_MODELS, REPO_ROOT)
+inference_framework = os.getenv("WAKEWORD_INFERENCE_FRAMEWORK")
+if not inference_framework:
+    if wakeword_models and all(path.lower().endswith(".onnx") for path in wakeword_models):
+        inference_framework = "onnx"
+    elif wakeword_models and all(path.lower().endswith(".tflite") for path in wakeword_models):
+        inference_framework = "tflite"
+    else:
+        inference_framework = "onnx"
+        print(
+            "⚠️  Mixed or unknown wakeword model extensions detected; "
+            "defaulting WAKEWORD_INFERENCE_FRAMEWORK=onnx"
+        )
+_ensure_openwakeword_models()
 try:
-    wakeword_detector = OpenWakeWordDetector(wakeword_models, WAKEWORD_THRESHOLD)
+    wakeword_detector = OpenWakeWordDetector(
+        wakeword_models,
+        WAKEWORD_THRESHOLD,
+        inference_framework,
+    )
 except Exception as exc:
     raise SystemExit(f"Wakeword initialization failed: {exc}")
 
@@ -894,7 +941,8 @@ try:
             if is_silence_timeout or is_max_length or is_no_speech_timeout:
                 print(f"🛑 Capture complete. Frames: {len(current_command_frames)}")
 
-                temp_audio_path = f"/tmp/cmd_{int(time.time())}.wav"
+                temp_dir = tempfile.gettempdir()
+                temp_audio_path = os.path.join(temp_dir, f"cmd_{int(time.time())}.wav")
                 with wave.open(temp_audio_path, 'wb') as wf:
                     wf.setnchannels(1)
                     wf.setsampwidth(pa.get_sample_size(pyaudio.paInt16))
@@ -919,4 +967,3 @@ except KeyboardInterrupt:
         audio_stream.close()
     if pa is not None:
         pa.terminate()
-
