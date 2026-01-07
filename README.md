@@ -1,161 +1,152 @@
 # Voice Assistant with Gemini Flash
 
-A voice-controlled assistant powered by Google Gemini Flash that can control smart home devices, manage Bluetooth connections, and answer questions using natural language.
+A distributed voice assistant powered by Google Gemini Flash with real-time speech processing, smart home control, and WebSocket audio streaming.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    COMPUTE NODE (RTX 5090)                       │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐          │
+│  │   Whisper   │    │   Gemini    │    │    XTTS     │          │
+│  │     STT     │    │     LLM     │    │     TTS     │          │
+│  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘          │
+│         │                  │                  │                  │
+│         └──────────────────┴──────────────────┘                  │
+│                            │                                     │
+│                   FastAPI Server (:8000)                         │
+│                   WebSocket + HTTP                               │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ WebSocket Audio Stream
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     EDGE NODE (Mini PC)                          │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐          │
+│  │ Microphone  │    │  Wake Word  │    │   Speaker   │          │
+│  │    Input    │───▶│  Detection  │───▶│   Output    │          │
+│  └─────────────┘    └─────────────┘    └─────────────┘          │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Features
 
-- 🎤 **Wake Word Detection**: Uses OpenWakeWord (open source) for built-in or custom wake words
-- 🗣️ **Speech-to-Text**: Local transcription with Whisper.cpp
-- 🤖 **AI Processing**: Google Gemini 2.5 Flash Lite for natural language understanding
-- 🔧 **Function Calling**: Control smart home lights, Bluetooth devices, audio routing, and YouTube Music
-- 🔊 **Text-to-Speech**: Ultra-low latency local TTS using Piper (~100-200ms)
-- ⌨️ **Push-to-Talk Mode**: Alternative mode using spacebar to activate
-- 🎵 **YouTube Music**: Play songs, albums, artists, and playlists
-- 🔉 **Volume Control**: Adjust system volume with voice commands
-- 🐳 **Docker Support**: Distributed architecture with Edge/Compute node split
+- 🎤 **Wake Word Detection**: OpenWakeWord with custom wake words
+- 🗣️ **Speech-to-Text**: GPU-accelerated Whisper (~100ms latency)
+- 🤖 **AI Processing**: Gemini 2.5 Flash Lite with function calling
+- 🔊 **Streaming TTS**: XTTS v2 with real-time audio streaming (~0.5s to first audio)
+- 🏠 **Smart Home Control**: Control4 lighting integration
+- 🎵 **YouTube Music**: Play songs, albums, and playlists
+- ⏱️ **Timers**: Voice-controlled timers with announcements
 
-## Docker Deployment (Distributed Architecture)
+## Quick Start
 
-The assistant is now optimized for a distributed setup using Docker. This separates the high-performance "Brain" (Compute Node) from the "Ear/Mouth" (Endpoint Node).
+### 1. Start XTTS Server (GPU TTS)
+```powershell
+./scripts/refresh_xtts.ps1 -WaitForHealth
+```
 
-### 1. Compute Node (RTX 5090 / High-End PC)
-Handles STT, LLM orchestration, and high-quality TTS.
+### 2. Start Compute Node (Docker)
+```powershell
+docker compose up compute -d
+```
 
-1.  **Prerequisites**: Install [Docker](https://docs.docker.com/get-docker/) and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
-2.  **Configuration**: Set your `GEMINI_API_KEY` in the root `.env` file.
-3.  **Launch**:
-    ```bash
-    docker compose up compute --build
-    ```
+### 3. Deploy Edge Node
+```powershell
+./scripts/deploy_native.ps1
+```
 
-### 2. Edge Node (Mini PC / Raspberry Pi 5)
-Handles microphone input, wake word detection, and audio playback.
-
-1.  **Prerequisites**: Install Docker.
-2.  **Configuration**: In `.env`, set `COMPUTE_SERVER_URL` to your Compute Node's IP (e.g., `http://192.168.1.50:8000`).
-3.  **Launch**:
-    ```bash
-    docker compose up edge --build
-    ```
-
-> **Note for Pi 5 Users**: Ensure your Docker user is in the `audio` group to allow the container to access hardware sound devices (`/dev/snd`).
-
-## Prerequisites (Non-Docker)
-
-- Python 3.9+
-- macOS or Linux (Raspberry Pi supported)
-- [Whisper.cpp](https://github.com/ggerganov/whisper.cpp) installed locally
-- Google Gemini API key
-- OpenWakeWord models (no API key required)
-- Piper TTS voice model (for local text-to-speech)
-
-## Project Structure (New Architecture)
+## Project Structure
 
 ```
 voice_assist/
-├── docker-compose.yml      # Orchestrates Edge & Compute containers
+├── docker-compose.yml       # Compute container orchestration
+├── xtts_server.py           # XTTS TTS server (runs natively)
+├── speaker_reference.wav    # Voice cloning reference
 ├── services/
-│   ├── compute/            # Brain Service (GPU/ML Heavy)
-│   │   ├── Dockerfile
-│   │   └── src/            # FastAPI server + Core Logic
-│   └── edge/               # Endpoint Service (Audio I/O)
-│       ├── Dockerfile
-│       └── src/            # Wake Word Detection Loop
-├── core/                   # Shared libraries
-├── tools/                  # Specific tool integrations
-├── docs/                   # Documentation & Setup Guides
-├── tests/                  # Automated tests
-└── scripts/                # Setup & Maintenance scripts
+│   ├── compute/             # GPU/ML processing (Docker)
+│   │   └── src/server.py    # FastAPI + WebSocket server
+│   └── edge/                # Audio I/O (runs on Mini PC)
+│       └── src/main.py      # Wake word + streaming client
+├── scripts/
+│   ├── deploy_native.ps1    # Deploy Edge to Mini PC
+│   ├── refresh_xtts.ps1     # Restart XTTS server
+│   └── refresh_whisper.ps1  # Restart Whisper server
+├── docs/                    # Documentation
+├── models/                  # Wake word models
+└── legacy/                  # Old monolithic code (archived)
 ```
 
-## Legacy Installation (Manual)
+## Configuration
 
-See [Installation Guide](docs/INSTALLATION_MANUAL.md) for non-docker setups.
-
-## Usage (Edge Node)
-
-### Wake Word Mode (Continuous Listening)
-
-The Edge Node runs the wake word listener:
-
+Create `.env` file in root:
 ```bash
-python services/edge/src/main.py
+# Gemini
+GEMINI_API_KEY=your_key_here
+MODEL_NAME=gemini-2.5-flash-lite
+
+# Servers
+XTTS_SERVER_URL=http://192.168.20.148:5001
+WHISPER_SERVER_URL=http://192.168.20.148:5000
+
+# Control4 (Smart Home)
+CONTROL4_USERNAME=your_username
+CONTROL4_PASSWORD=your_password
+CONTROL4_CONTROLLER_IP=192.168.20.1
 ```
 
-Say the wake word, then speak your command. The assistant will:
-1. Detect the wake word locally on the Edge Node
-2. Record your voice command and send it to the Compute Node
-3. Transcribe, process with Gemini, and synthesize audio on the Compute Node
-4. Play back the response audio on the Edge Node speakers
+Create `.env` in `services/edge/`:
+```bash
+COMPUTE_SERVER_URL=http://192.168.20.148:8000
+MIC_DEVICE_INDEX=0
+WAKEWORD_MODELS=models/wakeword/oo_gway.onnx
+WAKEWORD_THRESHOLD=0.5
+```
+
+## Updating Speaker Voice
+
+To change the TTS voice, record a new `speaker_reference.wav` (6-30 seconds) and restart XTTS:
+```powershell
+./scripts/refresh_xtts.ps1 -Speaker "path/to/new_reference.wav" -WaitForHealth
+```
+
+## Performance
+
+| Metric | Latency |
+|--------|---------|
+| Wake word → Transcript | ~125ms |
+| Time to first audio | ~0.5s (streaming) |
+| Full TTS synthesis | ~5-6s (241 chars) |
 
 ## Supported Commands
 
-### Lighting Control
+### Lighting
 - "Turn on the kitchen lights"
 - "Set kitchen island to 50%"
-- "Turn off the family room lights"
-- "Dim the foyer lights"
-
-**Device IDs:**
-- Kitchen Cans: 85
-- Foyer: 87
-- Stairs: 89
-- Upstairs Hall: 91
-- Front Door: 93
-- Kitchen Island: 95
-- Downstairs Hallway: 97
-- Upstairs Deck: 99
-- Family Room: 204
-- Breakfast: 206
-
-### Bluetooth & Audio Control
-- "Connect to [device name]"
-- "Disconnect Bluetooth"
-- "Route audio to Bluetooth"
-- "Turn up the volume"
-- "Set volume to 50%"
-- "Turn down the volume"
+- "Turn off all the lights"
 
 ### YouTube Music
-- "Play [song name]"
-- "Play [artist name]"
-- "Play [album name]"
-- "Stop the music"
-- "Pause"
+- "Play [song/artist/album]"
+- "Pause" / "Stop the music"
 
-### General Questions
-Ask any question and Computer will respond with concise answers.
-
-## Profiling & Debugging
-
-See [Debugging Guide](docs/DEBUGGING.md) for more details.
+### General
+- Ask any question for AI-powered responses
 
 ## Troubleshooting
 
-### "No speech detected"
-- Check microphone permissions
-- Speak louder or closer to the microphone
-- Ensure your `MIC_DEVICE_INDEX` is correct in `.env`
+### No audio playback
+- Check `MIC_DEVICE_INDEX` with `scripts/find_devices.py`
+- Ensure XTTS server is healthy: `curl http://localhost:5001/health`
 
-### "Gemini API failed"
-- Verify your API key in `.env`
-- Check your internet connection
+### Slow TTS
+- XTTS requires GPU (~6s for long text is normal)
+- For faster responses, ask shorter questions
 
-### Wake word not detecting
-- Verify `WAKEWORD_MODELS` points to a valid model
-- Check microphone input levels with `scripts/find_devices.py`
-
-## Contributing
-
-Feel free to submit issues and pull requests!
+### Multiple Python processes
+The deploy script auto-kills stale processes, but manually:
+```powershell
+ssh kenny@192.168.20.48 "taskkill /F /IM python.exe"
+```
 
 ## License
 
 MIT License
-
-## Acknowledgments
-
-- [Google Gemini](https://ai.google.dev/) for the LLM
-- [Piper](https://github.com/rhasspy/piper) for fast local TTS
-- [Whisper.cpp](https://github.com/ggerganov/whisper.cpp) for ASR
-- [OpenWakeWord](https://github.com/dscripka/openWakeWord) for wake word detection

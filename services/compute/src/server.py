@@ -94,9 +94,10 @@ def _transcribe_audio_bytes(audio_bytes: bytes, sample_rate: int, sample_width: 
             with contextlib.suppress(OSError):
                 os.remove(temp_path)
 
-def _process_text(user_command: str) -> tuple[str, Optional[bytes]]:
+def _process_text_llm_only(user_command: str) -> str:
+    """Process user command through LLM and return response text (no TTS)."""
     if not user_command:
-        return "", None
+        return ""
 
     # 2. LLM Routing & Processing
     realtime_keywords = ['weather', 'temperature', 'forecast', 'stock', 'price', 'market',
@@ -165,21 +166,56 @@ def _process_text(user_command: str) -> tuple[str, Optional[bytes]]:
                 conversation_memory.add("model", response_text)
 
     logger.info(f"💬 Assistant: {response_text}")
+    return response_text
 
-    audio_payload = None
-    if response_text and gpu_tts_client:
-        clean_text = preprocess_for_tts(response_text)
-        tts_result = gpu_tts_client.synthesize(clean_text)
-        if tts_result:
-            audio_data, sample_rate = tts_result
-            buffer = io.BytesIO()
-            with wave.open(buffer, 'wb') as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(sample_rate)
-                wf.writeframes(audio_data.tobytes())
-            audio_payload = buffer.getvalue()
+def _synthesize_tts_full(response_text: str) -> Optional[bytes]:
+    """Synthesize TTS and return full audio as WAV bytes."""
+    if not response_text or not gpu_tts_client:
+        return None
+    clean_text = preprocess_for_tts(response_text)
+    tts_result = gpu_tts_client.synthesize(clean_text)
+    if tts_result:
+        audio_data, sample_rate = tts_result
+        buffer = io.BytesIO()
+        with wave.open(buffer, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(audio_data.tobytes())
+        return buffer.getvalue()
+    return None
 
+async def _synthesize_tts_stream_async(response_text: str):
+    """Async generator that yields TTS audio chunks (raw PCM int16)."""
+    import httpx
+    if not response_text or not gpu_tts_client:
+        return
+    clean_text = preprocess_for_tts(response_text)
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=60.0)) as client:
+            async with client.stream(
+                "POST",
+                f"{XTTS_SERVER_URL}/synthesize_stream",
+                json={"text": clean_text, "language": "en", "stream_chunk_size": 15}
+            ) as response:
+                if response.status_code != 200:
+                    logger.warning(f"TTS stream error: {response.status_code}")
+                    return
+                sample_rate = int(response.headers.get('X-Sample-Rate', 24000))
+                chunk_count = 0
+                async for raw_chunk in response.aiter_bytes(chunk_size=4800):  # ~100ms at 24kHz
+                    if raw_chunk:
+                        chunk_count += 1
+                        if chunk_count == 1:
+                            logger.info(f"TTS stream: first chunk received")
+                        yield raw_chunk, sample_rate
+    except Exception as e:
+        logger.error(f"TTS stream error: {e}")
+
+def _process_text(user_command: str) -> tuple[str, Optional[bytes]]:
+    """Process user command through LLM and TTS. Returns (response_text, audio_wav_bytes)."""
+    response_text = _process_text_llm_only(user_command)
+    audio_payload = _synthesize_tts_full(response_text)
     return response_text, audio_payload
 
 def _build_llm_contents(user_text: str, use_history: bool):
@@ -345,17 +381,51 @@ async def websocket_audio_endpoint(websocket: WebSocket):
                     })
 
                     if final_text:
+                        # Get LLM response (fast)
                         response_start = time.time()
-                        response_text, audio_payload = await asyncio.to_thread(_process_text, final_text)
-                        response_latency_ms = int((time.time() - response_start) * 1000)
+                        response_text = await asyncio.to_thread(_process_text_llm_only, final_text)
+                        llm_latency_ms = int((time.time() - response_start) * 1000)
+                        
+                        # Determine if we'll stream audio
+                        will_stream_audio = bool(response_text and gpu_tts_client)
+                        
+                        # Send text response immediately (user sees feedback faster)
                         await send_json({
                             "type": "assistant_response",
                             "session_id": session_id,
                             "response_text": response_text,
-                            "audio_base64": base64.b64encode(audio_payload).decode("utf-8")
-                            if audio_payload else None,
-                            "latency_ms": response_latency_ms
+                            "audio_base64": None,
+                            "latency_ms": llm_latency_ms,
+                            "audio_streaming": will_stream_audio
                         })
+                        
+                        # Stream TTS audio chunks (if applicable)
+                        if will_stream_audio:
+                            chunk_count = 0
+                            actual_sample_rate = 24000  # Default
+                            tts_start = time.time()
+                            try:
+                                async for chunk_data, sample_rate in _synthesize_tts_stream_async(response_text):
+                                    actual_sample_rate = sample_rate
+                                    chunk_count += 1
+                                    # Send raw audio chunk as binary
+                                    await websocket.send_bytes(chunk_data)
+                                    
+                                # Signal end of audio stream
+                                await send_json({
+                                    "type": "audio_stream_end",
+                                    "session_id": session_id,
+                                    "chunks_sent": chunk_count,
+                                    "sample_rate": actual_sample_rate,
+                                    "tts_latency_ms": int((time.time() - tts_start) * 1000)
+                                })
+                            except Exception as tts_err:
+                                logger.error(f"TTS streaming error: {tts_err}")
+                                await send_json({
+                                    "type": "audio_stream_end",
+                                    "session_id": session_id,
+                                    "error": str(tts_err)
+                                })
                     break
                 elif msg_type == "ping":
                     await send_json({"type": "pong", "session_id": session_id})

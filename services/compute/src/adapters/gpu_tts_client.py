@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class GPUTTSConfig:
     """Configuration for GPU TTS client."""
     server_url: str = "http://localhost:5001"
-    timeout_seconds: float = 3.0  # Max time to wait for GPU server
+    timeout_seconds: float = 10.0  # Max time to wait for GPU server
     stream_timeout_seconds: float = 30.0
     stream_chunk_size: int = 15
     stream_chunk_bytes: int = 2400
@@ -59,7 +59,7 @@ class GPUTTSClient:
         server_url: str = None,
         piper_voice = None,
         piper_sample_rate: int = 22050,
-        timeout_seconds: float = 3.0,
+        timeout_seconds: float = 10.0,
         stream_timeout_seconds: float = 30.0,
         stream_chunk_size: int = 15,
         stream_chunk_bytes: int = 2400,
