@@ -18,6 +18,7 @@ _state = {
     "compute_url": os.getenv("COMPUTE_SERVER_URL", "http://localhost:8000"),
     "compute_status": "unknown",
     "compute_latency_ms": None,
+    "end_to_final_ms": None,
 }
 
 def update_state(key, value):
@@ -186,8 +187,9 @@ DASHBOARD_HTML = """
                     const computeEl = document.getElementById('compute-status');
                     computeEl.textContent = data.compute_status;
                     computeEl.className = 'status-badge status-' + data.compute_status.toLowerCase();
-                    document.getElementById('compute-latency').textContent = 
-                        data.compute_latency_ms ? data.compute_latency_ms + 'ms' : '--';
+                    const healthLatency = data.compute_latency_ms ? data.compute_latency_ms + 'ms' : '--';
+                    const endToFinal = data.end_to_final_ms ? ' | Speech->Text ' + data.end_to_final_ms + 'ms' : '';
+                    document.getElementById('compute-latency').textContent = healthLatency + endToFinal;
 
                     // Transcript
                     document.getElementById('transcript').textContent = 

@@ -14,7 +14,7 @@ This guide explains how to set up the Voice Assistant in a distributed "Edge/Com
   - **Hardware**: Mini PC (N100), Raspberry Pi 5, or Laptop.
   - **Service**: Runs the "Ears" and "Mouth" (Mic input, Wake Word detection, Speaker output).
   - **Container**: `services/edge/Dockerfile`
-  - **Communication**: Sends audio to the Compute Node via HTTP.
+  - **Communication**: Streams audio to the Compute Node via WebSocket (HTTP fallback available).
 
 ## Step 1: Compute Node Setup
 
@@ -49,6 +49,8 @@ This guide explains how to set up the Voice Assistant in a distributed "Edge/Com
 2.  **Environment Configuration**: In the root `.env`, set the server URL.
     ```bash
     COMPUTE_SERVER_URL=http://<COMPUTE_NODE_IP>:8000
+    # Optional override (defaults to ws://<COMPUTE_NODE_IP>:8000/ws/audio)
+    # COMPUTE_WS_URL=ws://<COMPUTE_NODE_IP>:8000/ws/audio
     MIC_DEVICE_INDEX=0  # Use scripts/find_devices.py to identify
     ```
 
