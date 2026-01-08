@@ -131,6 +131,29 @@ To change the TTS voice, record a new `speaker_reference.wav` (6-30 seconds) and
 ### General
 - Ask any question for AI-powered responses
 
+## Auto-Start and Kiosk Mode
+
+To have the Edge node start automatically on boot and (optionally) enter a full-screen dashboard mode:
+
+### 1. Enable Windows Auto-Login
+Since audio devices require an active user session:
+1. On the Edge Mini PC, press `Win + R`, type `netplwiz`, and press Enter.
+2. Uncheck **"Users must enter a user name and password to use this computer"**.
+3. Click **Apply**, enter your password when prompted, and click **OK**.
+
+### 2. Register Startup Task
+Run the deployment script with the `-RegisterStartup` flag from your dev machine:
+```powershell
+./scripts/deploy_native.ps1 -RegisterStartup
+```
+This creates a Windows Task Scheduler task that runs the assistant whenever the user logs in.
+
+### 3. (Optional) Kiosk Mode
+To launch the dashboard in full-screen on boot:
+1. Create a shortcut to Chrome or Edge in your Startup folder (`Win + R`, type `shell:startup`).
+2. Right-click the shortcut -> **Properties**.
+3. In the **Target** field, append: `--kiosk http://localhost:5000 --edge-kiosk-type=fullscreen`.
+
 ## Troubleshooting
 
 ### No audio playback

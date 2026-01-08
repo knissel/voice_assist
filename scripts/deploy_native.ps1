@@ -1,6 +1,7 @@
 param (
     [string]$EDGE_IP = "192.168.20.48",
-    [string]$EDGE_USER = "kenny"
+    [string]$EDGE_USER = "kenny",
+    [switch]$RegisterStartup
 )
 
 Write-Host "[SYNC] Syncing code to Edge ($EDGE_IP)..." -ForegroundColor Cyan
@@ -16,6 +17,10 @@ ssh $sshTarget 'powershell -Command New-Item -ItemType Directory -Force -Path C:
 # Copy the src files and the .env
 scp -r services/edge/src/* "${sshTarget}:C:/Users/Kenny/voice_assist_edge/"
 scp services/edge/.env "${sshTarget}:C:/Users/Kenny/voice_assist_edge/"
+
+if ($RegisterStartup) {
+    ./scripts/manage_startup.ps1 -Action "register" -EDGE_IP $EDGE_IP -EDGE_USER $EDGE_USER
+}
 
 Write-Host "[START] Starting Edge Assistant natively..." -ForegroundColor Green
 
