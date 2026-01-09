@@ -44,6 +44,11 @@ except Exception:
     openwakeword = None
     OpenWakeWordModel = None
 
+try:
+    import alsaaudio
+except Exception:
+    alsaaudio = None
+
 # === CONFIGURATION ===
 COMPUTE_SERVER_URL = os.getenv("COMPUTE_SERVER_URL", "http://localhost:8000")
 def _compute_ws_url(http_url: str) -> str:
@@ -68,12 +73,29 @@ STREAM_PRE_ROLL_CHUNKS = max(1, int(VAD_PRE_ROLL_MS / STREAM_CHUNK_MS))
 # === UTILS ===
 def _resolve_wakeword_models(models: list[str], repo_root: str) -> list[str]:
     resolved = []
+    pretrained_paths = None
+    pretrained_map = None
+    if openwakeword is not None:
+        try:
+            pretrained_paths = openwakeword.get_pretrained_model_paths()
+            pretrained_map = openwakeword.models
+        except Exception:
+            pretrained_paths = None
+            pretrained_map = None
     for item in models:
         expanded = os.path.expanduser(item)
+        if pretrained_map and expanded in pretrained_map:
+            resolved.append(pretrained_map[expanded]["model_path"])
+            continue
         if not os.path.isabs(expanded):
             candidate = os.path.join(repo_root, expanded)
             if os.path.exists(candidate):
                 expanded = candidate
+        if pretrained_paths and not os.path.isabs(expanded) and not expanded.endswith(".onnx"):
+            matches = [p for p in pretrained_paths if os.path.basename(p).rsplit(".", 1)[0].startswith(expanded)]
+            if matches:
+                resolved.extend(matches)
+                continue
         resolved.append(expanded)
     return resolved
 
@@ -126,6 +148,45 @@ class AudioRecorderState:
     RECORDING = 1
     PROCESSING = 2
 
+class AlsaInputStream:
+    def __init__(self, device: str, rate: int, channels: int, frame_length: int, channel_index: int | None = None):
+        if alsaaudio is None:
+            raise RuntimeError("pyalsaaudio not installed")
+        self.channels = channels
+        self.frame_length = frame_length
+        self.channel_index = channel_index
+        self.pcm = alsaaudio.PCM(
+            alsaaudio.PCM_CAPTURE,
+            alsaaudio.PCM_NORMAL,
+            device=device
+        )
+        self.pcm.setchannels(channels)
+        self.pcm.setrate(rate)
+        self.pcm.setformat(alsaaudio.PCM_FORMAT_S16_LE)
+        self.pcm.setperiodsize(frame_length)
+
+    def read(self, frame_length: int, exception_on_overflow: bool = False) -> bytes:
+        length, data = self.pcm.read()
+        if not data:
+            return b""
+        if self.channels == 1:
+            return data
+        audio = np.frombuffer(data, dtype=np.int16)
+        if audio.size % self.channels != 0:
+            return data
+        audio = audio.reshape(-1, self.channels)
+        if self.channel_index is not None and 0 <= self.channel_index < self.channels:
+            mono = audio[:, self.channel_index]
+        else:
+            mono = audio.mean(axis=1).astype(np.int16)
+        return mono.tobytes()
+
+    def stop_stream(self):
+        return
+
+    def close(self):
+        self.pcm.close()
+
 class EdgeAssistant:
     def __init__(self):
         self.state = AudioRecorderState.LISTENING
@@ -140,11 +201,11 @@ class EdgeAssistant:
         # Audio Input (Mic)
         self._setup_mic()
 
-        # Optional ReSpeaker DSP control
-        self._setup_respeaker_dsp()
-
         # Optional ReSpeaker LED ring
         self._setup_respeaker_led()
+
+        # Optional ReSpeaker DSP control
+        self._setup_respeaker_dsp()
         
         # Wake Word
         self._setup_wakeword()
@@ -160,6 +221,21 @@ class EdgeAssistant:
         self._processing_done = False
         self._current_frames = None
         self._led_state = None
+        self.input_channels = 1
+        channel_env = os.getenv("MIC_CHANNEL_INDEX")
+        try:
+            self._mic_channel_index = int(channel_env) if channel_env is not None else None
+        except ValueError:
+            self._mic_channel_index = None
+        gain_env = os.getenv("MIC_GAIN", "1.0")
+        try:
+            self._mic_gain = float(gain_env)
+        except ValueError:
+            self._mic_gain = 1.0
+        self._wakeword_debug = os.getenv("WAKEWORD_DEBUG", "false").strip().lower() in {"1", "true", "yes", "on"}
+        self._wakeword_debug_last = 0.0
+        buffer_frames = int(os.getenv("WAKEWORD_BUFFER_FRAMES", "25"))
+        self._wakeword_audio_buffer: collections.deque[np.ndarray] = collections.deque(maxlen=buffer_frames)
 
     def _set_status(self, status: str):
         update_dashboard_state("status", status)
@@ -169,29 +245,72 @@ class EdgeAssistant:
 
     def _setup_speaker(self):
         # We'll use sounddevice for persistent output
-        self.sample_rate = 22050 # Standard for Piper, will resample if needed
-        self.out_stream = sd.OutputStream(
-            samplerate=self.sample_rate,
-            channels=1,
-            dtype='int16'
-        )
-        self.out_stream.start()
+        self.sample_rate = int(os.getenv("TTS_OUTPUT_SAMPLE_RATE", "22050"))
+        self.out_stream = None
+
+        def _open_output(sample_rate: int) -> sd.OutputStream:
+            stream = sd.OutputStream(
+                samplerate=sample_rate,
+                channels=1,
+                dtype='int16'
+            )
+            stream.start()
+            return stream
+
+        try:
+            self.out_stream = _open_output(self.sample_rate)
+        except Exception as exc:
+            try:
+                default_rate = int(sd.query_devices(None, 'output')["default_samplerate"])
+            except Exception:
+                default_rate = self.sample_rate
+            if default_rate != self.sample_rate:
+                print(f"[WARN] Output sample rate {self.sample_rate} unsupported; falling back to {default_rate}")
+                self.sample_rate = default_rate
+            try:
+                self.out_stream = _open_output(self.sample_rate)
+            except Exception as exc2:
+                print(f"[WARN] Failed to open audio output: {exc2}")
+                self.out_stream = None
 
     def _setup_mic(self):
+        alsa_device = os.getenv("ALSA_INPUT_DEVICE")
+        if alsa_device:
+            channels = int(os.getenv("ALSA_INPUT_CHANNELS", "6"))
+            self.pa = None
+            self.in_stream = AlsaInputStream(
+                device=alsa_device,
+                rate=WAKEWORD_SAMPLE_RATE,
+                channels=channels,
+                frame_length=WAKEWORD_FRAME_LENGTH,
+                channel_index=self._mic_channel_index,
+            )
+            self.input_channels = 1
+            print(f"[INFO] Using ALSA input device {alsa_device} ({channels}ch)")
+            return
+
         self.pa = pyaudio.PyAudio()
         input_device = _resolve_input_device_index(self.pa, os.getenv("MIC_DEVICE_INDEX"))
+        self.input_channels = int(os.getenv("MIC_CHANNELS", "1"))
         kwargs = {
             "rate": WAKEWORD_SAMPLE_RATE,
-            "channels": 1,
+            "channels": self.input_channels,
             "format": pyaudio.paInt16,
             "input": True,
             "frames_per_buffer": WAKEWORD_FRAME_LENGTH,
         }
         if input_device is not None:
             kwargs["input_device_index"] = input_device
-        self.in_stream = self.pa.open(
-            **kwargs
-        )
+        try:
+            self.in_stream = self.pa.open(**kwargs)
+        except Exception as exc:
+            if self.input_channels > 1:
+                print(f"[WARN] Failed to open mic with {self.input_channels}ch ({exc}); falling back to mono")
+                self.input_channels = 1
+                kwargs["channels"] = 1
+                self.in_stream = self.pa.open(**kwargs)
+            else:
+                raise
 
     def _setup_respeaker_dsp(self):
         def _env_truthy(value: str | None, default: bool) -> bool:
@@ -284,6 +403,14 @@ class EdgeAssistant:
         _ensure_openwakeword_models()
         
         resolved_models = _resolve_wakeword_models(WAKEWORD_MODELS, self.repo_root)
+        if openwakeword is not None:
+            repaired = []
+            for model in resolved_models:
+                if (not os.path.isabs(model) or not os.path.exists(model)) and model in getattr(openwakeword, "models", {}):
+                    repaired.append(openwakeword.models[model]["model_path"])
+                else:
+                    repaired.append(model)
+            resolved_models = repaired
         print(f"[INFO] Loading wakeword models: {resolved_models}")
 
         # openwakeword API varies across versions (wakeword_models vs wakeword_model_paths).
@@ -323,6 +450,9 @@ class EdgeAssistant:
 
     def play_audio(self, audio_bytes: bytes):
         """Play WAV bytes received from compute server."""
+        if not self.out_stream:
+            print("[WARN] No audio output stream available; skipping playback")
+            return
         # For simplicity, save to temp and play or use sounddevice
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(audio_bytes)
@@ -331,8 +461,19 @@ class EdgeAssistant:
         # Read WAV
         with wave.open(tmp_path, 'rb') as wf:
             data = wf.readframes(wf.getnframes())
+            src_rate = wf.getframerate()
             # Assume 16-bit PCM for now
             audio_np = np.frombuffer(data, dtype=np.int16)
+            if src_rate != self.sample_rate:
+                from scipy.signal import resample_poly
+                from math import gcd
+                g = gcd(src_rate, self.sample_rate)
+                audio_np = resample_poly(
+                    audio_np.astype(np.float32),
+                    self.sample_rate // g,
+                    src_rate // g
+                )
+                audio_np = np.clip(audio_np, -32768, 32767).astype(np.int16)
             self.out_stream.write(audio_np)
         
         os.remove(tmp_path)
@@ -512,18 +653,47 @@ class EdgeAssistant:
         try:
             while True:
                 pcm_bytes = self.in_stream.read(WAKEWORD_FRAME_LENGTH, exception_on_overflow=False)
+                if self.input_channels > 1 and pcm_bytes:
+                    audio = np.frombuffer(pcm_bytes, dtype=np.int16)
+                    if audio.size % self.input_channels == 0:
+                        audio = audio.reshape(-1, self.input_channels)
+                        if self._mic_channel_index is not None and 0 <= self._mic_channel_index < self.input_channels:
+                            mono = audio[:, self._mic_channel_index]
+                        else:
+                            mono = audio.mean(axis=1).astype(np.int16)
+                        pcm_bytes = mono.tobytes()
                 
                 if self.state == AudioRecorderState.LISTENING:
                     pre_roll_buffer.append(pcm_bytes)
                     pcm = np.frombuffer(pcm_bytes, dtype=np.int16)
-                    scores = self.wakeword_detector.predict(pcm)
+                    pcm_for_ww = pcm
+                    if self._mic_gain != 1.0 and pcm.size:
+                        pcm_for_ww = np.clip(
+                            pcm.astype(np.float32) * self._mic_gain,
+                            -32768,
+                            32767
+                        ).astype(np.int16)
+                    self._wakeword_audio_buffer.append(pcm_for_ww)
+                    if len(self._wakeword_audio_buffer) >= 5:
+                        merged = np.concatenate(list(self._wakeword_audio_buffer), axis=0)
+                        scores = self.wakeword_detector.predict(merged)
+                    else:
+                        scores = self.wakeword_detector.predict(pcm_for_ww)
+                    max_name = None
+                    max_score = 0.0
+                    if scores:
+                        max_name, max_score = max(scores.items(), key=lambda item: item[1])
+                    if self._wakeword_debug and scores:
+                        now = time.time()
+                        if now - self._wakeword_debug_last >= 1.0:
+                            rms = float(np.sqrt(np.mean(pcm.astype(np.float32) ** 2))) if pcm.size else 0.0
+                            print(f"[WAKE-DEBUG] rms={rms:.1f} curr={max_name}:{max_score:.3f} buf={len(self._wakeword_audio_buffer)}")
+                            self._wakeword_debug_last = now
                     
                     found = False
-                    for name, score in scores.items():
-                        if score >= WAKEWORD_THRESHOLD:
-                            print(f"[WAKE] Wake Word: {name}")
-                            found = True
-                            break
+                    if max_name is not None and max_score >= WAKEWORD_THRESHOLD:
+                        print(f"[WAKE] Wake Word: {max_name}")
+                        found = True
                     
                     if found and not self.is_processing:
                         pause_media()
@@ -610,9 +780,12 @@ class EdgeAssistant:
         except Exception as e:
             print(f"[ERROR] Error in loop: {e}")
         finally:
-            self.in_stream.stop_stream()
-            self.in_stream.close()
-            self.pa.terminate()
+            if hasattr(self.in_stream, "stop_stream"):
+                self.in_stream.stop_stream()
+            if hasattr(self.in_stream, "close"):
+                self.in_stream.close()
+            if self.pa is not None:
+                self.pa.terminate()
 
     def _process_on_compute(self, frames):
         try:

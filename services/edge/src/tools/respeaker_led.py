@@ -23,6 +23,27 @@ class PixelRing:
 
     def __init__(self, dev):
         self.dev = dev
+        self._claimed = False
+        self._prepare_device()
+
+    def _prepare_device(self) -> None:
+        try:
+            self.dev.set_configuration()
+        except Exception:
+            pass
+
+        interface_number = 3
+        try:
+            if self.dev.is_kernel_driver_active(interface_number):
+                self.dev.detach_kernel_driver(interface_number)
+        except Exception:
+            pass
+
+        try:
+            usb.util.claim_interface(self.dev, interface_number)
+            self._claimed = True
+        except Exception:
+            self._claimed = False
 
     def trace(self) -> None:
         self.write(0)
@@ -81,6 +102,11 @@ class PixelRing:
         )
 
     def close(self) -> None:
+        if self._claimed:
+            try:
+                usb.util.release_interface(self.dev, 3)
+            except Exception:
+                pass
         usb.util.dispose_resources(self.dev)
 
 
@@ -102,7 +128,7 @@ class RespeakerLedController:
             try:
                 self._ring.set_brightness(self._config.brightness)
             except Exception:
-                self._ring = None
+                pass
 
     @property
     def available(self) -> bool:

@@ -36,6 +36,28 @@ class RespeakerTuning:
 
     def __init__(self, dev):
         self.dev = dev
+        self._claimed = False
+        self._prepare_device()
+
+    def _prepare_device(self) -> None:
+        try:
+            self.dev.set_configuration()
+        except Exception:
+            pass
+
+        # Vendor interface is typically 3 on the ReSpeaker 4-mic array.
+        interface_number = 3
+        try:
+            if self.dev.is_kernel_driver_active(interface_number):
+                self.dev.detach_kernel_driver(interface_number)
+        except Exception:
+            pass
+
+        try:
+            usb.util.claim_interface(self.dev, interface_number)
+            self._claimed = True
+        except Exception:
+            self._claimed = False
 
     def write(self, name: str, value: int | float) -> None:
         data = PARAMETERS.get(name)
@@ -58,6 +80,11 @@ class RespeakerTuning:
         )
 
     def close(self) -> None:
+        if self._claimed:
+            try:
+                usb.util.release_interface(self.dev, 3)
+            except Exception:
+                pass
         usb.util.dispose_resources(self.dev)
 
 
