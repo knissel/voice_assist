@@ -1,0 +1,17 @@
+[Unit]
+Description=Voice Assistant Edge (Wake Word + Audio I/O)
+After=network.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/kenny/voice_assist
+Environment=PATH=/home/kenny/voice_assist/.venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/home/kenny/voice_assist/.env
+ExecStart=/home/kenny/voice_assist/.venv/bin/python /home/kenny/voice_assist/services/edge/src/main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

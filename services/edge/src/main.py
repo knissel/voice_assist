@@ -34,6 +34,8 @@ from core.event_bus import (
 )
 from tools.audio import pause_media, resume_media
 from dashboard import start_dashboard_thread, update_state as update_dashboard_state
+from tools.respeaker import RespeakerSettings, apply_settings as apply_respeaker_settings
+from tools.respeaker_led import RespeakerLedConfig, RespeakerLedController
 
 try:
     import openwakeword
@@ -91,6 +93,33 @@ def _ensure_openwakeword_models() -> None:
     except Exception as exc:
         print(f"[WARN] Failed to download OpenWakeWord resources: {exc}")
 
+def _resolve_input_device_index(pa: pyaudio.PyAudio, preferred: str | None) -> int | None:
+    """Resolve an input device index from an override (index or name substring)."""
+    if not preferred:
+        return None
+
+    preferred = str(preferred).strip()
+    if preferred.isdigit():
+        index = int(preferred)
+        try:
+            info = pa.get_device_info_by_index(index)
+            print(f"[INFO] Using input device index {index}: {info.get('name')}")
+            return index
+        except Exception as exc:
+            print(f"[WARN] Failed to read device index {preferred!r}: {exc}")
+            return None
+
+    lowered = preferred.lower()
+    for i in range(pa.get_device_count()):
+        info = pa.get_device_info_by_index(i)
+        name = (info.get("name") or "").lower()
+        if lowered in name and info.get("maxInputChannels", 0) > 0:
+            print(f"[INFO] Using input device index {i}: {info.get('name')}")
+            return i
+
+    print(f"[WARN] No input device matched {preferred!r}; using default")
+    return None
+
 # === CLASSES ===
 class AudioRecorderState:
     LISTENING = 0
@@ -110,6 +139,12 @@ class EdgeAssistant:
         
         # Audio Input (Mic)
         self._setup_mic()
+
+        # Optional ReSpeaker DSP control
+        self._setup_respeaker_dsp()
+
+        # Optional ReSpeaker LED ring
+        self._setup_respeaker_led()
         
         # Wake Word
         self._setup_wakeword()
@@ -124,6 +159,13 @@ class EdgeAssistant:
         self._speech_end_time = None
         self._processing_done = False
         self._current_frames = None
+        self._led_state = None
+
+    def _set_status(self, status: str):
+        update_dashboard_state("status", status)
+        if self._led_controller:
+            self._led_controller.set_state(status)
+        self._led_state = status
 
     def _setup_speaker(self):
         # We'll use sounddevice for persistent output
@@ -137,13 +179,103 @@ class EdgeAssistant:
 
     def _setup_mic(self):
         self.pa = pyaudio.PyAudio()
+        input_device = _resolve_input_device_index(self.pa, os.getenv("MIC_DEVICE_INDEX"))
+        kwargs = {
+            "rate": WAKEWORD_SAMPLE_RATE,
+            "channels": 1,
+            "format": pyaudio.paInt16,
+            "input": True,
+            "frames_per_buffer": WAKEWORD_FRAME_LENGTH,
+        }
+        if input_device is not None:
+            kwargs["input_device_index"] = input_device
         self.in_stream = self.pa.open(
-            rate=WAKEWORD_SAMPLE_RATE,
-            channels=1,
-            format=pyaudio.paInt16,
-            input=True,
-            frames_per_buffer=WAKEWORD_FRAME_LENGTH
+            **kwargs
         )
+
+    def _setup_respeaker_dsp(self):
+        def _env_truthy(value: str | None, default: bool) -> bool:
+            if value is None:
+                return default
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+
+        if os.getenv("RESPEAKER_DSP_ENABLED", "true").strip().lower() in {"0", "false", "no", "off"}:
+            print("[INFO] ReSpeaker DSP control disabled via RESPEAKER_DSP_ENABLED")
+            return
+
+        settings = RespeakerSettings(
+            aec_enabled=_env_truthy(os.getenv("RESPEAKER_AEC"), True),
+            ns_enabled=_env_truthy(os.getenv("RESPEAKER_NS"), True),
+            agc_enabled=_env_truthy(os.getenv("RESPEAKER_AGC"), True),
+        )
+
+        def _parse_usb_id(value: str | None, default: int) -> int:
+            if not value:
+                return default
+            try:
+                return int(value, 0)
+            except ValueError:
+                print(f"[WARN] Invalid USB id {value!r}; using default {hex(default)}")
+                return default
+
+        vid = _parse_usb_id(os.getenv("RESPEAKER_USB_VID"), 0x2886)
+        pid = _parse_usb_id(os.getenv("RESPEAKER_USB_PID"), 0x0018)
+
+        try:
+            applied = apply_respeaker_settings(settings, vid=vid, pid=pid)
+        except Exception as exc:
+            print(f"[WARN] Failed to configure ReSpeaker DSP: {exc}")
+            return
+
+        if applied:
+            print(f"[INFO] ReSpeaker DSP configured (AEC={settings.aec_enabled}, NS={settings.ns_enabled}, AGC={settings.agc_enabled})")
+        else:
+            print("[INFO] ReSpeaker DSP device not found; skipping DSP configuration")
+
+    def _setup_respeaker_led(self):
+        def _env_truthy(value: str | None, default: bool) -> bool:
+            if value is None:
+                return default
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+
+        self._led_controller = None
+        if not _env_truthy(os.getenv("RESPEAKER_LED_ENABLED"), True):
+            print("[INFO] ReSpeaker LED control disabled via RESPEAKER_LED_ENABLED")
+            return
+
+        def _parse_usb_id(value: str | None, default: int) -> int:
+            if not value:
+                return default
+            try:
+                return int(value, 0)
+            except ValueError:
+                print(f"[WARN] Invalid USB id {value!r}; using default {hex(default)}")
+                return default
+
+        def _parse_brightness(value: str | None) -> int | None:
+            if value is None or value.strip() == "":
+                return None
+            try:
+                brightness = int(value)
+            except ValueError:
+                print(f"[WARN] Invalid RESPEAKER_LED_BRIGHTNESS {value!r}; ignoring")
+                return None
+            return max(0, min(255, brightness))
+
+        vid = _parse_usb_id(os.getenv("RESPEAKER_USB_VID"), 0x2886)
+        pid = _parse_usb_id(os.getenv("RESPEAKER_USB_PID"), 0x0018)
+        config = RespeakerLedConfig(brightness=_parse_brightness(os.getenv("RESPEAKER_LED_BRIGHTNESS")))
+        try:
+            controller = RespeakerLedController(vid=vid, pid=pid, config=config)
+        except Exception as exc:
+            print(f"[WARN] Failed to initialize ReSpeaker LED ring: {exc}")
+            return
+
+        if controller.available:
+            self._led_controller = controller
+            print("[INFO] ReSpeaker LED ring connected")
+        else:
+            print("[INFO] ReSpeaker LED ring not found or unavailable; skipping LED control")
 
     def _setup_wakeword(self):
         if OpenWakeWordModel is None:
@@ -153,18 +285,37 @@ class EdgeAssistant:
         
         resolved_models = _resolve_wakeword_models(WAKEWORD_MODELS, self.repo_root)
         print(f"[INFO] Loading wakeword models: {resolved_models}")
-        
-        self.wakeword_detector = OpenWakeWordModel(
-            wakeword_models=resolved_models,
-            inference_framework="onnx"
-        )
+
+        # openwakeword API varies across versions (wakeword_models vs wakeword_model_paths).
+        import inspect
+        params = inspect.signature(OpenWakeWordModel).parameters
+        kwargs = {}
+        if "wakeword_model_paths" in params:
+            kwargs["wakeword_model_paths"] = resolved_models
+        else:
+            kwargs["wakeword_models"] = resolved_models
+
+        # Only pass inference_framework if supported; older versions forward kwargs to AudioFeatures.
+        if "inference_framework" in params:
+            kwargs["inference_framework"] = "onnx"
+
+        self.wakeword_detector = OpenWakeWordModel(**kwargs)
 
     def _setup_vad(self):
-        # We still need VAD on edge to know when to stop recording
+        # We still need VAD on edge to know when to stop recording.
+        # Prefer the bundled JIT model to avoid torch.hub downloads.
+        vad_path = os.path.join(self.repo_root, "models", "silero_vad.jit")
+        if os.path.exists(vad_path):
+            self.vad_model = torch.jit.load(vad_path)
+            self.vad_model.eval()
+            self.vad_available = True
+            return
+
+        # Fallback to torch.hub if the local model is missing.
         model, utils = torch.hub.load(
-            repo_or_dir='snakers4/silero-vad', 
-            model='silero_vad', 
-            force_reload=False, 
+            repo_or_dir='snakers4/silero-vad',
+            model='silero_vad',
+            force_reload=False,
             onnx=False
         )
         self.vad_model = model
@@ -196,7 +347,7 @@ class EdgeAssistant:
         self._stream_session_id = None
         self._speech_end_time = None
         self._current_frames = None
-        update_dashboard_state("status", "listening")
+        self._set_status("listening")
         print("[LISTEN] Ready for next wake word...")
         resume_media()
 
@@ -265,8 +416,10 @@ class EdgeAssistant:
                     if data.get("audio_streaming"):
                         is_streaming_audio = True
                         print(f"[TTS] Streaming audio...")
+                        self._set_status("speaking")
                     elif data.get("audio_base64"):
                         # Fallback to base64 audio (non-streaming)
+                        self._set_status("speaking")
                         audio_bytes = base64.b64decode(data["audio_base64"])
                         self.play_audio(audio_bytes)
                         done_event.set()
@@ -347,7 +500,7 @@ class EdgeAssistant:
 
     async def run(self):
         print("[LISTEN] Edge Assistant Listening...")
-        update_dashboard_state("status", "listening")
+        self._set_status("listening")
         pre_roll_buffer = collections.deque(maxlen=20) # ~1.5s
         stream_pre_roll = collections.deque(maxlen=STREAM_PRE_ROLL_CHUNKS)
         current_command_frames = []
@@ -375,7 +528,7 @@ class EdgeAssistant:
                     if found and not self.is_processing:
                         pause_media()
                         emit_state_changed(self.bus, "idle", "listening")
-                        update_dashboard_state("status", "recording")
+                        self._set_status("recording")
                         
                         # Clear pre-roll buffer - don't include wake word audio
                         pre_roll_buffer.clear()
@@ -427,7 +580,7 @@ class EdgeAssistant:
                     has_enough_audio = len(current_command_frames) >= min_frames
                     if (has_enough_audio and speech_detected and silence_counter > 10) or len(current_command_frames) > 150:
                         print("[STOP] Recording finished")
-                        update_dashboard_state("status", "processing")
+                        self._set_status("processing")
                         self.state = AudioRecorderState.PROCESSING
                         self.is_processing = True
                         self._speech_end_time = time.time()
@@ -496,6 +649,7 @@ class EdgeAssistant:
                 # 3. Handle Audio Playback
                 audio_b64 = data.get('audio_base64')
                 if audio_b64:
+                    self._set_status("speaking")
                     audio_bytes = base64.b64decode(audio_b64)
                     self.play_audio(audio_bytes)
                 
