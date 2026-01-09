@@ -18,8 +18,11 @@ except Exception:  # pragma: no cover - optional dependency
 
 PARAMETERS = {
     "AGCONOFF": (19, 0, "int"),
+    "STATNOISEONOFF": (19, 8, "int"),
     "NONSTATNOISEONOFF": (19, 11, "int"),
+    "ECHOONOFF": (19, 14, "int"),
     "NLAEC_MODE": (19, 20, "int"),
+    "STATNOISEONOFF_SR": (19, 33, "int"),
     "NONSTATNOISEONOFF_SR": (19, 34, "int"),
 }
 
@@ -104,8 +107,11 @@ def apply_settings(settings: RespeakerSettings, vid: int = 0x2886, pid: int = 0x
 
     try:
         tuning.write("AGCONOFF", 1 if settings.agc_enabled else 0)
+        tuning.write("STATNOISEONOFF", 1 if settings.ns_enabled else 0)
         tuning.write("NONSTATNOISEONOFF", 1 if settings.ns_enabled else 0)
+        tuning.write("STATNOISEONOFF_SR", 1 if settings.ns_enabled else 0)
         tuning.write("NONSTATNOISEONOFF_SR", 1 if settings.ns_enabled else 0)
+        tuning.write("ECHOONOFF", 1 if settings.aec_enabled else 0)
         tuning.write("NLAEC_MODE", 2 if settings.aec_enabled else 0)
         return True
     finally:

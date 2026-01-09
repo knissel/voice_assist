@@ -90,6 +90,8 @@ If scores stay near 0.0, confirm:
 ## ReSpeaker DSP Controls (AEC/NS/AGC)
 
 The ReSpeaker mic array exposes DSP controls over USB. These settings are optional and only apply if the device is detected.
+`RESPEAKER_AEC` toggles echo suppression and NLAEC mode; `RESPEAKER_NS` toggles stationary and non-stationary noise suppression (including ASR variants).
+In plain English: AEC removes speaker echo from the mic signal, NS reduces background noise, and AGC automatically levels the input volume.
 
 ```bash
 # Enable/disable DSP control
@@ -111,8 +113,26 @@ RESPEAKER_USB_PID=0x0018
 # Enable/disable LED ring control
 RESPEAKER_LED_ENABLED=true
 
-# Optional: brightness 0-255
-RESPEAKER_LED_BRIGHTNESS=64
+# Optional: brightness 0-31
+RESPEAKER_LED_BRIGHTNESS=16
+```
+
+## Advanced Tuning (Optional)
+
+These settings tune app behavior (not hardware): wakeword buffering, the compute WS endpoint, and streaming/dashboard timing.
+
+```bash
+# Wakeword buffer (frames of 1280 samples)
+WAKEWORD_BUFFER_FRAMES=25
+
+# Compute WebSocket override (defaults to COMPUTE_SERVER_URL)
+COMPUTE_WS_URL=ws://<host>:<port>/ws
+
+# Edge streaming + dashboard
+DASHBOARD_PORT=5000
+STREAM_CHUNK_MS=40
+STREAM_QUEUE_MAX=200
+VAD_PRE_ROLL_MS=200
 ```
 
 ## Systemd User Service

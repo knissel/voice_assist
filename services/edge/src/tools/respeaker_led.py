@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 @dataclass
 class RespeakerLedConfig:
-    brightness: Optional[int] = None  # 0-255
+    brightness: Optional[int] = None  # 0-31
 
 
 class PixelRing:

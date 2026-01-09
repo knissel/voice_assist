@@ -379,7 +379,7 @@ class EdgeAssistant:
             except ValueError:
                 print(f"[WARN] Invalid RESPEAKER_LED_BRIGHTNESS {value!r}; ignoring")
                 return None
-            return max(0, min(255, brightness))
+            return max(0, min(31, brightness))
 
         vid = _parse_usb_id(os.getenv("RESPEAKER_USB_VID"), 0x2886)
         pid = _parse_usb_id(os.getenv("RESPEAKER_USB_PID"), 0x0018)
