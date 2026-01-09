@@ -60,12 +60,19 @@ def _compute_ws_url(http_url: str) -> str:
 COMPUTE_WS_URL = os.getenv("COMPUTE_WS_URL", _compute_ws_url(COMPUTE_SERVER_URL))
 WAKEWORD_MODELS = os.getenv("WAKEWORD_MODELS", "hey_jarvis").split(",")
 WAKEWORD_THRESHOLD = float(os.getenv("WAKEWORD_THRESHOLD", "0.5"))
+WAKEWORD_COOLDOWN_SECONDS = float(os.getenv("WAKEWORD_COOLDOWN_SECONDS", "1.5"))
 WAKEWORD_SAMPLE_RATE = 16000
 WAKEWORD_FRAME_LENGTH = 1280
 DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "5000"))
 STREAM_CHUNK_MS = int(os.getenv("STREAM_CHUNK_MS", "40"))
 STREAM_QUEUE_MAX = int(os.getenv("STREAM_QUEUE_MAX", "200"))
 VAD_PRE_ROLL_MS = int(os.getenv("VAD_PRE_ROLL_MS", "200"))
+VAD_SPEECH_THRESHOLD = float(os.getenv("VAD_SPEECH_THRESHOLD", "0.5"))
+VAD_SILENCE_SECONDS = float(os.getenv("VAD_SILENCE_SECONDS", os.getenv("WAKEWORD_SILENCE_SECONDS", "0.8")))
+VAD_GRACE_SECONDS = float(os.getenv("VAD_GRACE_SECONDS", os.getenv("WAKEWORD_GRACE_SECONDS", "0.8")))
+VAD_NO_SPEECH_SECONDS = float(os.getenv("VAD_NO_SPEECH_SECONDS", str(VAD_GRACE_SECONDS * 2)))
+VAD_MAX_RECORD_SECONDS = float(os.getenv("VAD_MAX_RECORD_SECONDS", os.getenv("WAKEWORD_MAX_RECORD_SECONDS", "12.0")))
+VAD_MIN_RECORD_SECONDS = float(os.getenv("VAD_MIN_RECORD_SECONDS", "1.0"))
 STREAM_CHUNK_SAMPLES = max(1, int(WAKEWORD_SAMPLE_RATE * STREAM_CHUNK_MS / 1000))
 STREAM_CHUNK_BYTES = STREAM_CHUNK_SAMPLES * 2
 STREAM_PRE_ROLL_CHUNKS = max(1, int(VAD_PRE_ROLL_MS / STREAM_CHUNK_MS))
@@ -236,12 +243,22 @@ class EdgeAssistant:
         self._wakeword_debug_last = 0.0
         buffer_frames = int(os.getenv("WAKEWORD_BUFFER_FRAMES", "25"))
         self._wakeword_audio_buffer: collections.deque[np.ndarray] = collections.deque(maxlen=buffer_frames)
+        self._suppress_wakeword_until = 0.0
+        self._speaking = False
 
     def _set_status(self, status: str):
         update_dashboard_state("status", status)
         if self._led_controller:
             self._led_controller.set_state(status)
         self._led_state = status
+
+    def _suppress_wakeword(self, seconds: float) -> None:
+        if seconds <= 0:
+            return
+        self._suppress_wakeword_until = max(self._suppress_wakeword_until, time.time() + seconds)
+
+    def _wakeword_suppressed(self) -> bool:
+        return self._speaking or time.time() < self._suppress_wakeword_until
 
     def _setup_speaker(self):
         # We'll use sounddevice for persistent output
@@ -502,12 +519,14 @@ class EdgeAssistant:
         audio_chunks = []  # Buffer for streaming audio
         sample_rate = 24000  # Default XTTS sample rate
         is_streaming_audio = False
+        had_tts_audio = False
         
         try:
             async for message in websocket:
                 # Handle binary audio chunks
                 if isinstance(message, bytes):
                     if is_streaming_audio:
+                        had_tts_audio = True
                         audio_chunks.append(message)
                         # Play chunk immediately for low latency
                         try:
@@ -556,13 +575,18 @@ class EdgeAssistant:
                     # Check if audio is streaming or base64 encoded
                     if data.get("audio_streaming"):
                         is_streaming_audio = True
+                        self._speaking = True
                         print(f"[TTS] Streaming audio...")
                         self._set_status("speaking")
                     elif data.get("audio_base64"):
                         # Fallback to base64 audio (non-streaming)
+                        self._speaking = True
+                        had_tts_audio = True
                         self._set_status("speaking")
                         audio_bytes = base64.b64decode(data["audio_base64"])
                         self.play_audio(audio_bytes)
+                        self._speaking = False
+                        self._suppress_wakeword(WAKEWORD_COOLDOWN_SECONDS)
                         done_event.set()
                     elif not data.get("audio_streaming"):
                         # No audio at all
@@ -571,6 +595,9 @@ class EdgeAssistant:
                     chunks_sent = data.get("chunks_sent", 0)
                     tts_latency = data.get("tts_latency_ms", 0)
                     print(f"[TTS] Stream complete: {chunks_sent} chunks, {tts_latency}ms")
+                    self._speaking = False
+                    if had_tts_audio:
+                        self._suppress_wakeword(WAKEWORD_COOLDOWN_SECONDS)
                     done_event.set()
                 elif msg_type == "error":
                     print(f"[ERROR] Compute WS error: {data.get('error')}")
@@ -578,6 +605,8 @@ class EdgeAssistant:
         except Exception as exc:
             print(f"[ERROR] Compute WS receive failed: {exc}")
             done_event.set()
+        finally:
+            self._speaking = False
 
     async def _stream_to_compute(self):
         session_id = self._stream_session_id or str(uuid.uuid4())[:8]
@@ -647,6 +676,12 @@ class EdgeAssistant:
         current_command_frames = []
         speech_detected = False
         silence_counter = 0
+        recording_frames = 0
+        silence_limit_frames = max(1, int(VAD_SILENCE_SECONDS * WAKEWORD_SAMPLE_RATE / WAKEWORD_FRAME_LENGTH))
+        max_record_frames = max(1, int(VAD_MAX_RECORD_SECONDS * WAKEWORD_SAMPLE_RATE / WAKEWORD_FRAME_LENGTH))
+        grace_frames = max(1, int(VAD_GRACE_SECONDS * WAKEWORD_SAMPLE_RATE / WAKEWORD_FRAME_LENGTH))
+        no_speech_frames = max(1, int(VAD_NO_SPEECH_SECONDS * WAKEWORD_SAMPLE_RATE / WAKEWORD_FRAME_LENGTH))
+        min_record_frames = max(1, int(VAD_MIN_RECORD_SECONDS * WAKEWORD_SAMPLE_RATE / WAKEWORD_FRAME_LENGTH))
         
         VAD_NORMALIZE = 1.0 / 32768.0
 
@@ -665,6 +700,10 @@ class EdgeAssistant:
                 
                 if self.state == AudioRecorderState.LISTENING:
                     pre_roll_buffer.append(pcm_bytes)
+                    if self._wakeword_suppressed():
+                        self._wakeword_audio_buffer.clear()
+                        await asyncio.sleep(0.01)
+                        continue
                     pcm = np.frombuffer(pcm_bytes, dtype=np.int16)
                     pcm_for_ww = pcm
                     if self._mic_gain != 1.0 and pcm.size:
@@ -711,6 +750,7 @@ class EdgeAssistant:
                         stream_pre_roll = collections.deque(maxlen=STREAM_PRE_ROLL_CHUNKS)
                         speech_detected = False
                         silence_counter = 0
+                        recording_frames = 0
                         self._processing_done = False
                         self._speech_end_time = None
                         self._stream_queue = asyncio.Queue(maxsize=STREAM_QUEUE_MAX)
@@ -722,21 +762,29 @@ class EdgeAssistant:
 
                 elif self.state == AudioRecorderState.RECORDING:
                     current_command_frames.append(pcm_bytes)
+                    recording_frames += 1
                     
                     # VAD Check - Silero VAD needs exactly 512 samples at 16kHz
-                    audio_int16 = np.frombuffer(pcm_bytes, dtype=np.int16)
-                    # Take only the first 512 samples for VAD (Silero requirement)
-                    vad_chunk = audio_int16[:512] if len(audio_int16) >= 512 else audio_int16
-                    vad_tensor = torch.from_numpy(vad_chunk.astype(np.float32) * VAD_NORMALIZE)
-                    prob = self.vad_model(vad_tensor, WAKEWORD_SAMPLE_RATE).item()
+                    prob = 0.0
+                    if self.vad_available:
+                        audio_int16 = np.frombuffer(pcm_bytes, dtype=np.int16)
+                        try:
+                            for start in range(0, len(audio_int16) - 511, 512):
+                                vad_chunk = audio_int16[start:start + 512]
+                                vad_tensor = torch.from_numpy(vad_chunk.astype(np.float32) * VAD_NORMALIZE)
+                                prob = max(prob, self.vad_model(vad_tensor, WAKEWORD_SAMPLE_RATE).item())
+                                if prob >= VAD_SPEECH_THRESHOLD:
+                                    break
+                        except Exception as exc:
+                            print(f"[WARN] VAD error: {exc}")
                     
-                    if prob >= 0.5:
+                    if prob >= VAD_SPEECH_THRESHOLD:
                         if not speech_detected:
                             speech_detected = True
                             print(f"[VAD] Speech detected")
                         silence_counter = 0
                     else:
-                        if speech_detected:
+                        if speech_detected or recording_frames >= grace_frames:
                             silence_counter += 1
 
                     # Always send audio chunks during recording (don't gate on speech_detected)
@@ -746,9 +794,11 @@ class EdgeAssistant:
                         await self._enqueue_audio_chunk(chunk)
                     
                     # End recording conditions - require minimum frames (~1 sec) before stopping
-                    min_frames = 12  # ~1 second of audio at 80ms per frame
-                    has_enough_audio = len(current_command_frames) >= min_frames
-                    if (has_enough_audio and speech_detected and silence_counter > 10) or len(current_command_frames) > 150:
+                    has_enough_audio = recording_frames >= min_record_frames
+                    silence_timeout = speech_detected and silence_counter >= silence_limit_frames
+                    no_speech_timeout = (not speech_detected) and recording_frames >= no_speech_frames
+                    max_length = recording_frames >= max_record_frames
+                    if (has_enough_audio and silence_timeout) or no_speech_timeout or max_length:
                         print("[STOP] Recording finished")
                         self._set_status("processing")
                         self.state = AudioRecorderState.PROCESSING
