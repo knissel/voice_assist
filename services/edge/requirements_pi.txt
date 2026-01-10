@@ -15,6 +15,12 @@ numpy>=1.24.0,<2.0.0
 # Wake word detection
 openwakeword
 
+# Optional ALSA direct capture (bypass PipeWire)
+pyalsaaudio>=0.10.0
+
+# ReSpeaker mic DSP control
+pyusb>=1.2.1
+
 # TTS (local, fast)
 piper-tts>=1.2.0
 

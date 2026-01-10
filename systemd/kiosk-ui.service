@@ -1,0 +1,15 @@
+[Unit]
+Description=Voice Assistant Kiosk UI
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+ExecStart=/usr/bin/google-chrome --kiosk --no-first-run --disable-infobars --autoplay-policy=no-user-gesture-required http://localhost:5000
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
