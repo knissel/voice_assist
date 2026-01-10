@@ -5,7 +5,11 @@ Centralizes tool schemas and dispatch logic.
 import json
 from datetime import datetime
 from google.genai import types
-from tools.control4_tool import control_home_lighting
+try:
+    from tools.control4_tool import control_home_lighting
+except Exception as exc:
+    def control_home_lighting(device_id: int, brightness: int):
+        return f"Control4 unavailable: {exc}"
 from tools.bluetooth import connect_bluetooth_device, disconnect_bluetooth_device, get_bluetooth_status
 from tools.audio import route_to_bluetooth, set_audio_sink, get_audio_sinks, control_volume, pause_audio, resume_audio
 from tools.youtube_music import play_youtube_music, stop_music
