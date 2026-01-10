@@ -36,6 +36,15 @@ app = FastAPI(title="Voice Assistant Compute Server")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=GEMINI_API_KEY)
 MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.5-flash-lite")
+EDGE_TOOL_NAMES = {
+    name.strip()
+    for name in os.getenv(
+        "EDGE_TOOL_NAMES",
+        "play_youtube_music,stop_music,pause_audio,resume_audio,control_volume,set_audio_sink,route_to_bluetooth"
+    ).split(",")
+    if name.strip()
+}
+EDGE_TOOL_TIMEOUT_SECONDS = float(os.getenv("EDGE_TOOL_TIMEOUT_SECONDS", "15"))
 
 # Transcription
 transcription_service = create_transcription_service()
@@ -94,10 +103,10 @@ def _transcribe_audio_bytes(audio_bytes: bytes, sample_rate: int, sample_width: 
             with contextlib.suppress(OSError):
                 os.remove(temp_path)
 
-def _process_text_llm_only(user_command: str) -> str:
+def _process_text_llm_only(user_command: str, allow_remote_tools: bool = False) -> tuple[str, list[dict[str, Any]]]:
     """Process user command through LLM and return response text (no TTS)."""
     if not user_command:
-        return ""
+        return "", []
 
     # 2. LLM Routing & Processing
     realtime_keywords = ['weather', 'temperature', 'forecast', 'stock', 'price', 'market',
@@ -146,14 +155,18 @@ def _process_text_llm_only(user_command: str) -> str:
 
     response_text = ""
     has_tool_call = False
+    remote_tool_calls: list[dict[str, Any]] = []
     if response.candidates and response.candidates[0].content.parts:
         for part in response.candidates[0].content.parts:
             if part.function_call:
                 has_tool_call = True
                 tool_name = part.function_call.name
                 args = dict(part.function_call.args)
-                logger.info(f"✅ Executing tool: {tool_name}")
-                dispatch_tool(tool_name, args)
+                if allow_remote_tools and tool_name in EDGE_TOOL_NAMES:
+                    remote_tool_calls.append({"name": tool_name, "args": args})
+                else:
+                    logger.info(f"✅ Executing tool: {tool_name}")
+                    dispatch_tool(tool_name, args)
         
         if has_tool_call:
             if conversation_memory and CONVERSATION_RESET_ON_TOOL_CALL:
@@ -166,7 +179,7 @@ def _process_text_llm_only(user_command: str) -> str:
                 conversation_memory.add("model", response_text)
 
     logger.info(f"💬 Assistant: {response_text}")
-    return response_text
+    return response_text, remote_tool_calls
 
 def _synthesize_tts_full(response_text: str) -> Optional[bytes]:
     """Synthesize TTS and return full audio as WAV bytes."""
@@ -214,9 +227,62 @@ async def _synthesize_tts_stream_async(response_text: str):
 
 def _process_text(user_command: str) -> tuple[str, Optional[bytes]]:
     """Process user command through LLM and TTS. Returns (response_text, audio_wav_bytes)."""
-    response_text = _process_text_llm_only(user_command)
+    response_text, _ = _process_text_llm_only(user_command)
     audio_payload = _synthesize_tts_full(response_text)
     return response_text, audio_payload
+
+async def _await_tool_result(websocket: WebSocket, tool_call_id: str, timeout_s: float) -> dict[str, Any] | None:
+    deadline = time.monotonic() + timeout_s
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        message = await asyncio.wait_for(websocket.receive(), timeout=remaining)
+        if message.get("type") == "websocket.disconnect":
+            return None
+        if "text" not in message:
+            continue
+        try:
+            data = json.loads(message["text"])
+        except json.JSONDecodeError:
+            continue
+        if data.get("type") == "tool_result" and data.get("tool_call_id") == tool_call_id:
+            return data
+
+async def _dispatch_tools_to_edge(websocket: WebSocket, tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for tool_call in tool_calls:
+        tool_call_id = uuid.uuid4().hex[:8]
+        payload = {
+            "type": "tool_call",
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_call["name"],
+            "arguments": tool_call.get("args", {})
+        }
+        await websocket.send_text(json.dumps(payload))
+        result = await _await_tool_result(websocket, tool_call_id, EDGE_TOOL_TIMEOUT_SECONDS)
+        if result is None:
+            results.append({
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_call["name"],
+                "success": False,
+                "result": f"Tool {tool_call['name']} timed out on edge."
+            })
+        else:
+            results.append(result)
+    return results
+
+def _format_tool_results(tool_results: list[dict[str, Any]], fallback: str) -> str:
+    messages = []
+    for item in tool_results:
+        if not item:
+            continue
+        result_text = item.get("result")
+        if not result_text and item.get("error"):
+            result_text = item.get("error")
+        if result_text:
+            messages.append(str(result_text))
+    return " ".join(messages) if messages else fallback
 
 def _build_llm_contents(user_text: str, use_history: bool):
     if not use_history or not conversation_memory:
@@ -383,8 +449,16 @@ async def websocket_audio_endpoint(websocket: WebSocket):
                     if final_text:
                         # Get LLM response (fast)
                         response_start = time.time()
-                        response_text = await asyncio.to_thread(_process_text_llm_only, final_text)
+                        response_text, tool_calls = await asyncio.to_thread(
+                            _process_text_llm_only,
+                            final_text,
+                            True
+                        )
                         llm_latency_ms = int((time.time() - response_start) * 1000)
+
+                        if tool_calls:
+                            tool_results = await _dispatch_tools_to_edge(websocket, tool_calls)
+                            response_text = _format_tool_results(tool_results, response_text)
                         
                         # Determine if we'll stream audio
                         will_stream_audio = bool(response_text and gpu_tts_client)

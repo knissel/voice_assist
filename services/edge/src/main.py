@@ -33,6 +33,7 @@ from core.event_bus import (
     emit_assistant_text, emit_tool_call, emit_tool_result, emit_error
 )
 from tools.audio import pause_media, resume_media
+from tools.registry import dispatch_tool
 from dashboard import start_dashboard_thread, update_state as update_dashboard_state
 from tools.respeaker import RespeakerSettings, apply_settings as apply_respeaker_settings
 from tools.respeaker_led import RespeakerLedConfig, RespeakerLedController
@@ -567,6 +568,26 @@ class EdgeAssistant:
                         print(f"[LATENCY] End-to-final transcript: {end_to_final_ms}ms")
                     if not text:
                         done_event.set()
+                elif msg_type == "tool_call":
+                    tool_name = data.get("tool_name", "")
+                    args = data.get("arguments") or {}
+                    tool_call_id = data.get("tool_call_id", "")
+                    emit_tool_call(self.bus, tool_name, args)
+                    start = time.time()
+                    result = dispatch_tool(tool_name, args)
+                    duration_ms = int((time.time() - start) * 1000)
+                    success = not result.lower().startswith("tool execution failed") and not result.lower().startswith("unknown tool")
+                    emit_tool_result(self.bus, tool_name, success, result, duration_ms=duration_ms)
+                    try:
+                        await websocket.send(json.dumps({
+                            "type": "tool_result",
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                            "success": success,
+                            "result": result
+                        }))
+                    except Exception as e:
+                        print(f"[WARN] Failed to send tool_result: {e}")
                 elif msg_type == "assistant_response":
                     response_text = data.get("response_text", "")
                     emit_assistant_text(self.bus, response_text, is_partial=False)
