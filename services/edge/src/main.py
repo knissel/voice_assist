@@ -697,6 +697,19 @@ class EdgeAssistant:
                         else:
                             mono = audio.mean(axis=1).astype(np.int16)
                         pcm_bytes = mono.tobytes()
+                if not pcm_bytes:
+                    await asyncio.sleep(0.01)
+                    continue
+                pcm = np.frombuffer(pcm_bytes, dtype=np.int16)
+                if pcm.size < 400:
+                    await asyncio.sleep(0.01)
+                    continue
+                if pcm.size != WAKEWORD_FRAME_LENGTH:
+                    if pcm.size < WAKEWORD_FRAME_LENGTH:
+                        pcm = np.pad(pcm, (0, WAKEWORD_FRAME_LENGTH - pcm.size))
+                    else:
+                        pcm = pcm[:WAKEWORD_FRAME_LENGTH]
+                    pcm_bytes = pcm.tobytes()
                 
                 if self.state == AudioRecorderState.LISTENING:
                     pre_roll_buffer.append(pcm_bytes)
@@ -704,7 +717,6 @@ class EdgeAssistant:
                         self._wakeword_audio_buffer.clear()
                         await asyncio.sleep(0.01)
                         continue
-                    pcm = np.frombuffer(pcm_bytes, dtype=np.int16)
                     pcm_for_ww = pcm
                     if self._mic_gain != 1.0 and pcm.size:
                         pcm_for_ww = np.clip(
