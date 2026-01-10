@@ -6,8 +6,8 @@ param (
     [switch]$Logs
 )
 
-# Configuration - EDIT THESE FOR YOUR NETWORK
-$EDGE_IP = "192.168.20.48"
+# Configuration - EDIT THESE FOR YOUR NETWORK (IP or mDNS hostname)
+$EDGE_HOST = "192.168.20.48"
 $EDGE_USER = "kenny"
 $CONTEXT_NAME = "voice-edge"
 
@@ -16,7 +16,7 @@ $existingContext = docker context ls --format '{{.Name}}' | Select-String -Patte
 
 if (-not $existingContext) {
     Write-Host "Creating new Docker Context: $CONTEXT_NAME..." -ForegroundColor Cyan
-    docker context create $CONTEXT_NAME --description "Remote Mini PC" --docker "host=ssh://$EDGE_USER@$EDGE_IP"
+    docker context create $CONTEXT_NAME --description "Remote Mini PC" --docker "host=ssh://$EDGE_USER@$EDGE_HOST"
 }
 
 if ($Logs) {
@@ -25,7 +25,7 @@ if ($Logs) {
     exit
 }
 
-Write-Host "🚀 Deploying to $CONTEXT_NAME ($EDGE_IP)..." -ForegroundColor Green
+Write-Host "🚀 Deploying to $CONTEXT_NAME ($EDGE_HOST)..." -ForegroundColor Green
 
 # Use docker compose with the remote context
 # We use --build to ensure the latest local code is sent and built on the remote host

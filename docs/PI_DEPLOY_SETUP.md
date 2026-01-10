@@ -54,6 +54,15 @@ ping raspberrypi.local
 
 If it responds, you can use `raspberrypi.local` as your hostname.
 
+If you want a custom name, set it on the Pi:
+
+```bash
+sudo hostnamectl set-hostname voice-pi
+sudo systemctl restart avahi-daemon
+```
+
+Then use `voice-pi.local`.
+
 ### Option B: Find IP address from your router
 
 1. Log into your router's admin page (usually `192.168.1.1` or `192.168.0.1`)

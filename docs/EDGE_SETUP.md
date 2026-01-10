@@ -9,6 +9,19 @@ cd /home/kenny/voice_assist
 .venv/bin/python services/edge/src/main.py
 ```
 
+## mDNS Hostname (easy DNS on LAN)
+
+Give the edge box a friendly hostname and use `<hostname>.local` instead of IPs.
+
+```bash
+sudo hostnamectl set-hostname voice-edge
+sudo apt-get install -y avahi-daemon
+sudo systemctl enable --now avahi-daemon
+```
+
+Then use `voice-edge.local` in configs (e.g., `COMPUTE_SERVER_URL=http://voice-edge.local:8000`)
+and in deploy scripts that accept hostnames.
+
 ## MIC_DEVICE_INDEX (ReSpeaker selection)
 
 Set in `.env`:

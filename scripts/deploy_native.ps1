@@ -1,13 +1,14 @@
 param (
-    [string]$EDGE_IP = "192.168.20.48",
+    [Alias("EDGE_IP")]
+    [string]$EDGE_HOST = "192.168.20.48",
     [string]$EDGE_USER = "kenny",
     [switch]$RegisterStartup
 )
 
-Write-Host "[SYNC] Syncing code to Edge ($EDGE_IP)..." -ForegroundColor Cyan
+Write-Host "[SYNC] Syncing code to Edge ($EDGE_HOST)..." -ForegroundColor Cyan
 
 # Kill any existing Python processes to prevent stale instances
-$sshTarget = "$EDGE_USER@$EDGE_IP"
+$sshTarget = "$EDGE_USER@$EDGE_HOST"
 Write-Host "[CLEAN] Stopping any running Python processes..." -ForegroundColor Yellow
 ssh $sshTarget 'taskkill /F /IM python.exe 2>$null' 2>$null
 
