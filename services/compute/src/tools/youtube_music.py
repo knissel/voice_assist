@@ -28,6 +28,46 @@ def _stop_headless_playback():
 class YouTubeMusicManager:
     def __init__(self):
         self.ytmusic = YTMusic()
+
+    def _extract_video_id_from_section(self, section):
+        if not section:
+            return None, None
+        results = section.get("results") if isinstance(section, dict) else section
+        if isinstance(results, list):
+            for item in results:
+                video_id = item.get("videoId")
+                if video_id:
+                    title = item.get("title")
+                    artists = item.get("artists") or []
+                    artist_name = artists[0].get("name") if artists else None
+                    return video_id, {"title": title, "artist": artist_name}
+        return None, None
+
+    def _extract_artist_top_track(self, browse_id: str):
+        try:
+            artist = self.ytmusic.get_artist(browse_id)
+        except Exception as e:
+            return None, None, f"Artist lookup failed: {str(e)}"
+        for key in ("songs", "topSongs", "videos"):
+            video_id, meta = self._extract_video_id_from_section(artist.get(key))
+            if video_id:
+                return video_id, meta, None
+        return None, None, None
+
+    def _extract_album_track(self, browse_id: str):
+        try:
+            album = self.ytmusic.get_album(browse_id)
+        except Exception as e:
+            return None, None, f"Album lookup failed: {str(e)}"
+        tracks = album.get("tracks") or []
+        for track in tracks:
+            video_id = track.get("videoId")
+            if video_id:
+                return video_id, {
+                    "title": track.get("title"),
+                    "artist": (track.get("artists") or [{}])[0].get("name")
+                }, None
+        return None, None, None
     
     def search_and_play(self, query: str, search_type: str = "songs"):
         """
@@ -47,16 +87,48 @@ class YouTubeMusicManager:
                 return {"error": f"No results found for '{query}'"}
             
             result = results[0]
-            video_id = result.get('videoId')
-            
+            video_id = result.get("videoId")
+            browse_id = result.get("browseId")
+
+            if search_type == "artists" and browse_id:
+                artist_video_id, meta, error = self._extract_artist_top_track(browse_id)
+                if error:
+                    return {"error": error}
+                if artist_video_id:
+                    return {
+                        "video_id": artist_video_id,
+                        "url": f"https://music.youtube.com/watch?v={artist_video_id}",
+                        "title": meta.get("title") if meta else result.get("title", "Unknown"),
+                        "artist": meta.get("artist") if meta else result.get("title", "Unknown"),
+                        "artist_url": f"https://music.youtube.com/channel/{browse_id}"
+                    }
+                return {
+                    "artist_url": f"https://music.youtube.com/channel/{browse_id}",
+                    "title": result.get("title", "Unknown"),
+                    "artist": result.get("title", "Unknown")
+                }
+
+            if search_type == "albums" and browse_id:
+                album_video_id, meta, error = self._extract_album_track(browse_id)
+                if error:
+                    return {"error": error}
+                if album_video_id:
+                    return {
+                        "video_id": album_video_id,
+                        "url": f"https://music.youtube.com/watch?v={album_video_id}",
+                        "title": meta.get("title") if meta else result.get("title", "Unknown"),
+                        "artist": meta.get("artist") if meta else "Unknown",
+                        "album_url": f"https://music.youtube.com/browse/{browse_id}"
+                    }
+
             if not video_id:
                 return {"error": "Could not get video ID from search result"}
-            
+
             return {
                 "video_id": video_id,
                 "url": f"https://music.youtube.com/watch?v={video_id}",
-                "title": result.get('title', 'Unknown'),
-                "artist": result.get('artists', [{}])[0].get('name', 'Unknown') if result.get('artists') else 'Unknown'
+                "title": result.get("title", "Unknown"),
+                "artist": result.get("artists", [{}])[0].get("name", "Unknown") if result.get("artists") else "Unknown"
             }
         except Exception as e:
             return {"error": f"Search failed: {str(e)}"}
@@ -133,7 +205,20 @@ def play_youtube_music(query: str, content_type: str = "song"):
     
     url = result.get("url")
     if not url:
-        return "Failed to get playback URL"
+        if content_type == "artist":
+            artist_url = result.get("artist_url")
+            if artist_url and not headless_mode:
+                url = artist_url
+            else:
+                return "Failed to find a playable track for that artist."
+        elif content_type == "album":
+            album_url = result.get("album_url")
+            if album_url and not headless_mode:
+                url = album_url
+            else:
+                return "Failed to find a playable track for that album."
+        else:
+            return "Failed to get playback URL"
     
     # Check if headless mode is enabled (for Raspberry Pi)
     headless_mode = os.getenv("HEADLESS_PLAYBACK", "false").lower() == "true"
