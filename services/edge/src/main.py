@@ -242,7 +242,21 @@ class EdgeAssistant:
             self._mic_gain = 1.0
         self._wakeword_debug = os.getenv("WAKEWORD_DEBUG", "false").strip().lower() in {"1", "true", "yes", "on"}
         self._wakeword_debug_last = 0.0
-        buffer_frames = int(os.getenv("WAKEWORD_BUFFER_FRAMES", "25"))
+        buffer_frames_env = os.getenv("WAKEWORD_BUFFER_FRAMES", "5")
+        try:
+            buffer_frames = max(1, int(buffer_frames_env))
+        except ValueError:
+            buffer_frames = 5
+        merge_frames_env = os.getenv("WAKEWORD_MERGE_MIN_FRAMES", "1")
+        try:
+            self._wakeword_merge_min_frames = max(1, int(merge_frames_env))
+        except ValueError:
+            self._wakeword_merge_min_frames = 1
+        delay_env = os.getenv("WAKEWORD_POST_DETECT_DELAY", "0.0")
+        try:
+            self._wakeword_post_detect_delay = max(0.0, float(delay_env))
+        except ValueError:
+            self._wakeword_post_detect_delay = 0.0
         self._wakeword_audio_buffer: collections.deque[np.ndarray] = collections.deque(maxlen=buffer_frames)
         self._suppress_wakeword_until = 0.0
         self._speaking = False
@@ -263,7 +277,7 @@ class EdgeAssistant:
 
     def _setup_speaker(self):
         # We'll use sounddevice for persistent output
-        self.sample_rate = int(os.getenv("TTS_OUTPUT_SAMPLE_RATE", "22050"))
+        self.sample_rate = int(os.getenv("TTS_OUTPUT_SAMPLE_RATE", "24000"))
         self.out_stream = None
 
         def _open_output(sample_rate: int) -> sd.OutputStream:
@@ -291,6 +305,12 @@ class EdgeAssistant:
                 print(f"[WARN] Failed to open audio output: {exc2}")
                 self.out_stream = None
 
+        if self.out_stream and self.sample_rate != 24000:
+            print(
+                "[WARN] TTS output sample rate is not 24000 Hz; "
+                "resampling will add CPU/latency. Consider 24000 or 48000."
+            )
+
     def _setup_mic(self):
         alsa_device = os.getenv("ALSA_INPUT_DEVICE")
         if alsa_device:
@@ -310,6 +330,8 @@ class EdgeAssistant:
         self.pa = pyaudio.PyAudio()
         input_device = _resolve_input_device_index(self.pa, os.getenv("MIC_DEVICE_INDEX"))
         self.input_channels = int(os.getenv("MIC_CHANNELS", "1"))
+        if self.input_channels > 1 and self._mic_channel_index is None:
+            print("[WARN] MIC_CHANNELS>1 without MIC_CHANNEL_INDEX; downmixing may reduce wakeword sensitivity")
         kwargs = {
             "rate": WAKEWORD_SAMPLE_RATE,
             "channels": self.input_channels,
@@ -731,6 +753,13 @@ class EdgeAssistant:
                     else:
                         pcm = pcm[:WAKEWORD_FRAME_LENGTH]
                     pcm_bytes = pcm.tobytes()
+                if self._mic_gain != 1.0 and pcm.size:
+                    pcm = np.clip(
+                        pcm.astype(np.float32) * self._mic_gain,
+                        -32768,
+                        32767
+                    ).astype(np.int16)
+                    pcm_bytes = pcm.tobytes()
                 
                 if self.state == AudioRecorderState.LISTENING:
                     pre_roll_buffer.append(pcm_bytes)
@@ -738,19 +767,13 @@ class EdgeAssistant:
                         self._wakeword_audio_buffer.clear()
                         await asyncio.sleep(0.01)
                         continue
-                    pcm_for_ww = pcm
-                    if self._mic_gain != 1.0 and pcm.size:
-                        pcm_for_ww = np.clip(
-                            pcm.astype(np.float32) * self._mic_gain,
-                            -32768,
-                            32767
-                        ).astype(np.int16)
-                    self._wakeword_audio_buffer.append(pcm_for_ww)
-                    if len(self._wakeword_audio_buffer) >= 5:
-                        merged = np.concatenate(list(self._wakeword_audio_buffer), axis=0)
+                    self._wakeword_audio_buffer.append(pcm)
+                    merge_min = self._wakeword_merge_min_frames
+                    if merge_min > 1 and len(self._wakeword_audio_buffer) >= merge_min:
+                        merged = np.concatenate(list(self._wakeword_audio_buffer)[-merge_min:], axis=0)
                         scores = self.wakeword_detector.predict(merged)
                     else:
-                        scores = self.wakeword_detector.predict(pcm_for_ww)
+                        scores = self.wakeword_detector.predict(pcm)
                     max_name = None
                     max_score = 0.0
                     if scores:
@@ -775,8 +798,9 @@ class EdgeAssistant:
                         # Clear pre-roll buffer - don't include wake word audio
                         pre_roll_buffer.clear()
                         
-                        # Small delay to let wake word audio finish (prevents "Oogway" in transcript)
-                        await asyncio.sleep(0.3)
+                        # Optional delay to let wake word audio finish (prevents wakeword bleed)
+                        if self._wakeword_post_detect_delay:
+                            await asyncio.sleep(self._wakeword_post_detect_delay)
                         
                         self.state = AudioRecorderState.RECORDING
                         current_command_frames = []  # Start fresh, no pre-roll
@@ -834,30 +858,19 @@ class EdgeAssistant:
                     if (has_enough_audio and silence_timeout) or no_speech_timeout or max_length:
                         print("[STOP] Recording finished")
                         self._set_status("processing")
-                        self.state = AudioRecorderState.PROCESSING
                         self.is_processing = True
                         self._speech_end_time = time.time()
                         
                         # Signal end of audio stream
                         if self._stream_queue:
                             await self._stream_queue.put(None)
-                        
-                        # Wait for stream task to complete before going back to listening
-                        if self._stream_task:
-                            try:
-                                await asyncio.wait_for(self._stream_task, timeout=45)
-                            except asyncio.TimeoutError:
-                                print("[WARN] Stream task timed out")
-                            except Exception as e:
-                                print(f"[ERROR] Stream task error: {e}")
-                        
-                        # Now safe to reset state
+
+                        # Allow listening loop to continue while the compute task runs
                         self.state = AudioRecorderState.LISTENING
                         current_command_frames = []
                         pre_roll_buffer.clear()
                         self.wakeword_detector.reset()
-                        self._current_frames = None
-
+                
                 await asyncio.sleep(0.01)
 
         except Exception as e:

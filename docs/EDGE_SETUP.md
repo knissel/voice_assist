@@ -136,7 +136,12 @@ These settings tune app behavior (not hardware): wakeword buffering, the compute
 
 ```bash
 # Wakeword buffer (frames of 1280 samples)
-WAKEWORD_BUFFER_FRAMES=25
+WAKEWORD_BUFFER_FRAMES=5
+WAKEWORD_MERGE_MIN_FRAMES=1
+WAKEWORD_POST_DETECT_DELAY=0.0
+
+# TTS output sample rate (avoid resampling if it matches XTTS)
+TTS_OUTPUT_SAMPLE_RATE=24000
 
 # Compute WebSocket override (defaults to COMPUTE_SERVER_URL)
 COMPUTE_WS_URL=ws://<host>:<port>/ws
@@ -146,6 +151,10 @@ DASHBOARD_PORT=5000
 STREAM_CHUNK_MS=40
 STREAM_QUEUE_MAX=200
 VAD_PRE_ROLL_MS=200
+
+# Compute partial transcripts (compute server)
+WS_PARTIAL_INTERVAL_MS=1000
+WS_PARTIAL_ENABLED=true
 ```
 
 ## Systemd User Service

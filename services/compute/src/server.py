@@ -78,6 +78,13 @@ if USE_GPU_TTS:
 WS_PARTIAL_INTERVAL_MS = int(os.getenv("WS_PARTIAL_INTERVAL_MS", "500"))
 WS_PARTIAL_MIN_AUDIO_MS = int(os.getenv("WS_PARTIAL_MIN_AUDIO_MS", "300"))
 WS_PARTIAL_MAX_AUDIO_MS = int(os.getenv("WS_PARTIAL_MAX_AUDIO_MS", "8000"))
+WS_PARTIAL_ENABLED = os.getenv("WS_PARTIAL_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+PARTIALS_ENABLED = (
+    WS_PARTIAL_ENABLED
+    and WS_PARTIAL_INTERVAL_MS > 0
+    and WS_PARTIAL_MIN_AUDIO_MS > 0
+    and WS_PARTIAL_MAX_AUDIO_MS > 0
+)
 
 def _audio_duration_ms(byte_len: int, sample_rate: int, sample_width: int, channels: int) -> int:
     bytes_per_second = sample_rate * sample_width * channels
@@ -515,7 +522,11 @@ async def websocket_audio_endpoint(websocket: WebSocket):
                 audio_ms = _audio_duration_ms(len(audio_buffer), sample_rate, sample_width, channels)
                 now = time.time()
 
-                if audio_ms >= WS_PARTIAL_MIN_AUDIO_MS and (now - last_partial_time) * 1000 >= WS_PARTIAL_INTERVAL_MS:
+                if (
+                    PARTIALS_ENABLED
+                    and audio_ms >= WS_PARTIAL_MIN_AUDIO_MS
+                    and (now - last_partial_time) * 1000 >= WS_PARTIAL_INTERVAL_MS
+                ):
                     last_partial_time = now
                     max_bytes = int((WS_PARTIAL_MAX_AUDIO_MS / 1000.0) * sample_rate * sample_width * channels)
                     snapshot = bytes(audio_buffer[-max_bytes:]) if max_bytes > 0 else bytes(audio_buffer)
