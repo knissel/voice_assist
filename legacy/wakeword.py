@@ -13,6 +13,7 @@ import numpy as np
 import sounddevice as sd
 import torch
 import tempfile
+import atexit
 from google import genai
 from google.genai import types
 from piper.voice import PiperVoice
@@ -40,6 +41,51 @@ except Exception:
     websockets = None
 
 load_dotenv()
+
+PIDFILE_PATH = os.getenv("WAKEWORD_PIDFILE", "/tmp/voice_assist_wakeword.pid")
+
+def _is_process_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+def _acquire_pidfile(path: str) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                existing = handle.read().strip()
+            existing_pid = int(existing)
+        except Exception:
+            existing_pid = None
+        if existing_pid and _is_process_alive(existing_pid):
+            raise SystemExit(f"Wakeword already running (pid {existing_pid}).")
+        try:
+            os.remove(path)
+        except OSError:
+            raise SystemExit("Wakeword already running (stale pidfile).")
+        return _acquire_pidfile(path)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(str(os.getpid()))
+
+    def _cleanup_pidfile():
+        try:
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as handle:
+                    if handle.read().strip() == str(os.getpid()):
+                        os.remove(path)
+        except OSError:
+            pass
+
+    atexit.register(_cleanup_pidfile)
+
+_acquire_pidfile(PIDFILE_PATH)
 
 AUTO_ROUTE_BT_SINK = os.getenv("AUTO_ROUTE_BT_SINK", "true").lower() == "true"
 BT_AUDIO_DEVICE_NAME = os.getenv("BT_AUDIO_DEVICE_NAME")
@@ -845,6 +891,8 @@ FRAME_LENGTH = WAKEWORD_FRAME_LENGTH
 SAMPLE_RATE = WAKEWORD_SAMPLE_RATE
 PRE_ROLL_SECONDS = _get_env_float("WAKEWORD_PRE_ROLL_SECONDS", 1.5)
 MAX_PRE_ROLL_FRAMES = max(1, int(SAMPLE_RATE * PRE_ROLL_SECONDS / FRAME_LENGTH))
+DEBUG_LEVELS = os.getenv("WAKEWORD_DEBUG_LEVELS", "false").lower() == "true"
+DEBUG_LEVELS_EVERY = _get_env_int("WAKEWORD_DEBUG_LEVELS_EVERY", 50)
 
 SILENCE_SECONDS = _get_env_float("WAKEWORD_SILENCE_SECONDS", 0.8)
 MAX_RECORD_SECONDS = _get_env_float("WAKEWORD_MAX_RECORD_SECONDS", 15.0)
@@ -868,6 +916,7 @@ vad_silence_counter = 0
 recording_frames = 0
 speech_detected = False
 vad_tensor = torch.zeros(FRAME_LENGTH, dtype=torch.float32)
+debug_frame_count = 0
 
 # Start the worker thread
 assistant_worker.start()
@@ -884,6 +933,12 @@ try:
             continue
 
         pre_roll_buffer.append(pcm_bytes)
+        if DEBUG_LEVELS:
+            debug_frame_count += 1
+            if debug_frame_count % max(1, DEBUG_LEVELS_EVERY) == 0:
+                pcm = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
+                rms = float(np.sqrt(np.mean(pcm * pcm)) / 32768.0)
+                print(f"Mic RMS level: {rms:.4f}", flush=True)
 
         # -----------------------------------------------------
         # 2. STATE MACHINE
