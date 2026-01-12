@@ -1,0 +1,25 @@
+# services/ops_agent/config.yaml
+
+# Defines the services this agent is responsible for managing on THIS node.
+# The dashboard will query this config to know what buttons to show.
+
+services:
+  whisper_server:
+    type: powershell
+    # Command to start the service
+    start_cmd: "Start-Process python -ArgumentList 'whisper_server.py' -WorkingDirectory '..\\..\\' -WindowStyle Minimized"
+    # Command to stop the service (brute force for now, can be refined)
+    stop_cmd: "taskkill /F /IM python.exe /FI \"WINDOWTITLE eq whisper_server\""
+    # URL to check health (returns 200 OK)
+    check_url: "http://localhost:5000/health"
+    
+  xtts_server:
+    type: powershell
+    start_cmd: "Start-Process python -ArgumentList 'xtts_server.py' -WorkingDirectory '..\\..\\' -WindowStyle Minimized"
+    stop_cmd: "taskkill /F /IM python.exe /FI \"WINDOWTITLE eq xtts_server\""
+    check_url: "http://localhost:5001/health"
+
+  # Example for a Systemd service (uncomment for Linux nodes)
+  # voice_assistant:
+  #   type: systemd
+  #   service_name: voice-assistant-edge

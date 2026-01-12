@@ -1,0 +1,128 @@
+.modalOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.modalOverlay.active {
+    display: flex;
+}
+
+.modal {
+    background: var(--bg-secondary);
+    border-radius: 24px;
+    padding: 24px;
+    width: 90%;
+    max-width: 400px;
+    animation: modalIn 0.3s ease;
+}
+
+@keyframes modalIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.modalTitle {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.timerInputGroup {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.timerInput {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.timerInput input {
+    width: 80px;
+    height: 80px;
+    background: var(--bg-card);
+    border: 2px solid var(--border-color);
+    border-radius: 16px;
+    color: var(--text-primary);
+    font-size: 32px;
+    font-weight: 600;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.timerInput input:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.timerInput label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.timerNameInput {
+    width: 100%;
+    padding: 16px;
+    background: var(--bg-card);
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    color: var(--text-primary);
+    font-size: 16px;
+    margin-bottom: 20px;
+}
+
+.timerNameInput:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.modalActions {
+    display: flex;
+    gap: 12px;
+}
+
+.modalBtn {
+    flex: 1;
+    padding: 16px;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.modalBtn:active {
+    transform: scale(0.98);
+}
+
+.modalBtn.cancel {
+    background: var(--bg-card);
+    color: var(--text-primary);
+}
+
+.modalBtn.confirm {
+    background: var(--accent-blue);
+    color: white;
+}

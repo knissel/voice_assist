@@ -1,0 +1,102 @@
+/* Ported from legacy/ui/index.html */
+:root {
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #12121a;
+  --bg-card: #1a1a24;
+  --text-primary: #ffffff;
+  --text-secondary: #a0a0b0;
+  --accent-cyan: #22d3ee;
+  --accent-blue: #3b82f6;
+  --accent-green: #22c55e;
+  --accent-orange: #f97316;
+  --accent-red: #ef4444;
+  --accent-purple: #a855f7;
+  --border-color: #2a2a3a;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "DIN 2014", "DIN Alternate", "Avenir Next", "Noto Sans", "Liberation Sans", sans-serif;
+  background:
+    radial-gradient(1200px 700px at 10% -20%, rgba(34, 211, 238, 0.18), transparent 60%),
+    radial-gradient(900px 500px at 90% 10%, rgba(59, 130, 246, 0.18), transparent 60%),
+    var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow: hidden;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-blue) var(--bg-secondary);
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #2f3b66, #3b82f6);
+  border-radius: 999px;
+  border: 2px solid var(--bg-secondary);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #3c4a7a, #60a5fa);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--bg-secondary);
+}
+
+/* Utilities */
+.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Animations */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes pulse-fast {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.7; }
+}
+
+@keyframes wakeword-flash {
+  0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.9), 0 0 0 rgba(34, 211, 238, 0.0); }
+  100% { box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.0), 0 0 18px rgba(34, 211, 238, 0.0); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes urgentPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(249, 115, 22, 0); }
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

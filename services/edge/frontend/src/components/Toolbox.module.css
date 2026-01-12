@@ -1,0 +1,84 @@
+.toolbox {
+    background: var(--bg-secondary);
+    border-radius: 20px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+    min-height: 0;
+}
+
+.actionBtn {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: transform 0.2s, background 0.2s;
+    color: var(--text-primary);
+    font-family: inherit;
+}
+
+.actionBtn:active {
+    transform: scale(0.95);
+    background: var(--bg-secondary);
+}
+
+.actionBtn.active {
+    background: linear-gradient(135deg, rgba(34, 211, 238, 0.3), rgba(59, 130, 246, 0.4));
+    border-color: rgba(34, 211, 238, 0.8);
+}
+
+.actionIcon {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+}
+
+.actionIcon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    stroke: currentColor;
+}
+
+.actionLabel {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.actionBtn.active .actionLabel {
+    color: white;
+}
+
+@media (max-width: 760px) {
+    .toolbox {
+        flex-direction: row;
+        justify-content: space-between;
+    }
+
+    .toolbox .actionBtn {
+        flex: 1;
+        padding: 12px 10px;
+        border-radius: 14px;
+    }
+
+    .toolbox .actionLabel {
+        font-size: 10px;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+        text-align: center;
+    }
+}

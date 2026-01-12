@@ -11,6 +11,7 @@ httpx>=0.25.0
 pyaudio>=0.2.13
 sounddevice>=0.4.6
 numpy>=1.24.0,<2.0.0
+scipy>=1.10.0
 
 # Wake word detection
 openwakeword

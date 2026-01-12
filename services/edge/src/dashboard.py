@@ -1,3 +1,4 @@
+
 """
 Edge Status Dashboard - Lightweight web UI for monitoring the voice assistant.
 """
@@ -6,6 +7,9 @@ from flask import Flask, jsonify, render_template_string
 import time
 import requests
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 
@@ -15,9 +19,9 @@ _state = {
     "last_transcript": None,
     "last_response": None,
     "last_activity": None,
-    "compute_url": os.getenv("COMPUTE_SERVER_URL", "http://localhost:8000"),
-    "compute_status": "unknown",
-    "compute_latency_ms": None,
+    "remote_url": os.getenv("XTTS_SERVER_URL", "http://localhost:5001"),
+    "remote_status": "unknown",
+    "remote_latency_ms": None,
     "end_to_final_ms": None,
 }
 
@@ -31,7 +35,7 @@ def get_state():
     """Get the current state."""
     return _state.copy()
 
-# HTML Template - Modern dark theme dashboard
+# HTML Template
 DASHBOARD_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -86,6 +90,7 @@ DASHBOARD_HTML = """
         .status-listening { background: #00ff8840; color: #00ff88; }
         .status-recording { background: #ff880040; color: #ff8800; animation: pulse 1s infinite; }
         .status-processing { background: #00d9ff40; color: #00d9ff; animation: pulse 0.5s infinite; }
+        .status-speaking { background: #d900ff40; color: #d900ff; }
         .status-initializing { background: #88888840; color: #888888; }
         .status-online { background: #00ff8840; color: #00ff88; }
         .status-offline { background: #ff444440; color: #ff4444; }
@@ -142,18 +147,18 @@ DASHBOARD_HTML = """
             <div class="section-title">System Status</div>
             <div class="nodes-grid">
                 <div class="node-card">
-                    <div class="node-name">Edge Node</div>
+                    <div class="node-name">Assistant (Local)</div>
                     <div class="node-status">
                         <span id="edge-status" class="status-badge status-initializing">Initializing</span>
                     </div>
                     <div class="latency" id="edge-time">--</div>
                 </div>
                 <div class="node-card">
-                    <div class="node-name">Compute Node</div>
+                    <div class="node-name">Remote Services (5090)</div>
                     <div class="node-status">
-                        <span id="compute-status" class="status-badge status-unknown">Unknown</span>
+                        <span id="remote-status" class="status-badge status-unknown">Unknown</span>
                     </div>
-                    <div class="latency" id="compute-latency">--</div>
+                    <div class="latency" id="remote-latency">--</div>
                 </div>
             </div>
         </div>
@@ -183,13 +188,13 @@ DASHBOARD_HTML = """
                     document.getElementById('edge-time').textContent = 
                         data.last_activity ? 'Last: ' + data.last_activity : '--';
 
-                    // Compute status
-                    const computeEl = document.getElementById('compute-status');
-                    computeEl.textContent = data.compute_status;
-                    computeEl.className = 'status-badge status-' + data.compute_status.toLowerCase();
-                    const healthLatency = data.compute_latency_ms ? data.compute_latency_ms + 'ms' : '--';
-                    const endToFinal = data.end_to_final_ms ? ' | Speech->Text ' + data.end_to_final_ms + 'ms' : '';
-                    document.getElementById('compute-latency').textContent = healthLatency + endToFinal;
+                    // Remote status
+                    const remoteEl = document.getElementById('remote-status');
+                    remoteEl.textContent = data.remote_status;
+                    remoteEl.className = 'status-badge status-' + data.remote_status.toLowerCase();
+                    const healthLatency = data.remote_latency_ms ? data.remote_latency_ms + 'ms' : '--';
+                    const endToFinal = data.end_to_final_ms ? ' | Process: ' + data.end_to_final_ms + 'ms' : '';
+                    document.getElementById('remote-latency').textContent = healthLatency + endToFinal;
 
                     // Transcript
                     document.getElementById('transcript').textContent = 
@@ -213,25 +218,31 @@ def dashboard():
 
 @app.route('/api/status')
 def api_status():
-    # Check compute node health
+    # Check 5090 health
     try:
         start = time.time()
-        resp = requests.get(f"{_state['compute_url']}/health", timeout=2)
+        # Use simple timeout
+        resp = requests.get(f"{_state['remote_url']}/health", timeout=1.0)
         latency = int((time.time() - start) * 1000)
         if resp.status_code == 200:
-            _state["compute_status"] = "online"
-            _state["compute_latency_ms"] = latency
+            _state["remote_status"] = "online"
+            _state["remote_latency_ms"] = latency
         else:
-            _state["compute_status"] = "offline"
-            _state["compute_latency_ms"] = None
+            _state["remote_status"] = "offline"
+            _state["remote_latency_ms"] = None
     except Exception:
-        _state["compute_status"] = "offline"
-        _state["compute_latency_ms"] = None
+        _state["remote_status"] = "offline"
+        _state["remote_latency_ms"] = None
     
     return jsonify(_state)
 
 def run_dashboard(host="0.0.0.0", port=5000):
     """Run the dashboard in a background thread."""
+    # Quiet Flask logging
+    import logging
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
+    
     app.run(host=host, port=port, threaded=True, use_reloader=False)
 
 def start_dashboard_thread(host="0.0.0.0", port=5000):

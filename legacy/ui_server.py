@@ -47,7 +47,7 @@ class UIHTTPHandler(SimpleHTTPRequestHandler):
 async def websocket_handler(websocket, path=None):
     """Handle WebSocket connections from UI clients."""
     clients.add(websocket)
-    print(f"🖥️  UI client connected ({len(clients)} total)")
+    print(f"UI client connected ({len(clients)} total)")
     
     try:
         async for message in websocket:
@@ -60,7 +60,7 @@ async def websocket_handler(websocket, path=None):
         pass
     finally:
         clients.discard(websocket)
-        print(f"🖥️  UI client disconnected ({len(clients)} total)")
+        print(f"UI client disconnected ({len(clients)} total)")
 
 
 async def handle_client_message(data: dict, websocket):
@@ -117,14 +117,14 @@ def start_http_server():
     """Start the HTTP server for serving UI files."""
     handler = partial(UIHTTPHandler, directory=str(UI_DIR))
     httpd = HTTPServer(("0.0.0.0", HTTP_PORT), handler)
-    print(f"🌐 HTTP server running at http://0.0.0.0:{HTTP_PORT}")
+    print(f"HTTP server running at http://0.0.0.0:{HTTP_PORT}")
     httpd.serve_forever()
 
 
 async def start_websocket_server():
     """Start the WebSocket server."""
     async with websockets.serve(websocket_handler, "0.0.0.0", WS_PORT):
-        print(f"🔌 WebSocket server running at ws://0.0.0.0:{WS_PORT}")
+        print(f"WebSocket server running at ws://0.0.0.0:{WS_PORT}")
         await asyncio.Future()  # Run forever
 
 
@@ -136,10 +136,10 @@ def setup_event_bridge():
         if 'wakeword' in sys.modules:
             from wakeword import event_bus
             event_bus.subscribe("*", event_bus_callback)
-            print("✅ Event bridge connected to assistant")
+            print("Event bridge connected to assistant")
             return True
     except Exception as e:
-        print(f"⚠️  Could not connect to assistant event bus: {e}")
+        print(f"Could not connect to assistant event bus: {e}")
     
     return False
 
@@ -147,7 +147,7 @@ def setup_event_bridge():
 def main():
     """Main entry point."""
     print("=" * 50)
-    print("🤖 Computer UI Server")
+    print("Computer UI Server")
     print("=" * 50)
     
     # Check if UI files exist
@@ -167,8 +167,8 @@ def main():
     setup_event_bridge()
     
     print()
-    print(f"📱 Open in browser: http://localhost:{HTTP_PORT}")
-    print(f"📱 On Pi touchscreen: http://127.0.0.1:{HTTP_PORT}")
+    print(f"Open in browser: http://localhost:{HTTP_PORT}")
+    print(f"On Pi touchscreen: http://127.0.0.1:{HTTP_PORT}")
     print()
     print("Press Ctrl+C to stop")
     print()
@@ -177,7 +177,7 @@ def main():
     try:
         asyncio.run(start_websocket_server())
     except KeyboardInterrupt:
-        print("\n👋 Shutting down...")
+        print("\nShutting down...")
 
 
 if __name__ == "__main__":
