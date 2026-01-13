@@ -29,11 +29,9 @@ from core.event_bus import (
 )
 from dotenv import load_dotenv
 try:
-    import openwakeword
-    from openwakeword.model import Model as OpenWakeWordModel
+    import pvporcupine
 except Exception:
-    openwakeword = None
-    OpenWakeWordModel = None
+    pvporcupine = None
 
 try:
     import websockets
@@ -96,21 +94,10 @@ if AUTO_ROUTE_BT_SINK:
     except Exception as e:
         print(f"⚠️  Bluetooth routing failed: {e}")
 
-def _ensure_openwakeword_models() -> None:
-    """Download OpenWakeWord resources if they are missing."""
-    if openwakeword is None:
-        return
-    resources_dir = os.path.join(os.path.dirname(openwakeword.__file__), "resources", "models")
-    melspec_onnx = os.path.join(resources_dir, "melspectrogram.onnx")
-    if os.path.exists(melspec_onnx):
-        return
-    try:
-        from openwakeword.utils import download_models
-        print("⚠️  OpenWakeWord model resources missing; downloading...")
-        download_models(target_directory=resources_dir)
-        print("✅ OpenWakeWord resources downloaded")
-    except Exception as exc:
-        print(f"⚠️  Failed to download OpenWakeWord resources: {exc}")
+def _ensure_porcupine() -> None:
+    """Ensure Porcupine is available."""
+    if pvporcupine is None:
+        print("⚠️  pvporcupine is not installed. Run `pip install pvporcupine`.")
 
 def _get_env_float(name: str, default: float) -> float:
     """Parse a float env var with a safe fallback."""
@@ -149,37 +136,25 @@ def _resolve_wakeword_models(models: list[str], repo_root: str) -> list[str]:
         resolved.append(expanded)
     return resolved
 
-class OpenWakeWordDetector:
-    def __init__(self, wakeword_models: list[str], threshold: float, inference_framework: str):
-        if OpenWakeWordModel is None:
+class PorcupineDetector:
+    def __init__(self, access_key: str):
+        if pvporcupine is None:
             raise RuntimeError(
-                "openwakeword is not installed. Install it with `pip install openwakeword`."
+                "pvporcupine is not installed. Install it with `pip install pvporcupine`."
             )
-        self.threshold = threshold
-        self.model = OpenWakeWordModel(
-            wakeword_models=wakeword_models,
-            inference_framework=inference_framework,
+        self.detector = pvporcupine.create(
+            access_key=access_key,
+            keywords=['computer']
         )
 
     def process(self, pcm: np.ndarray):
-        scores = self.model.predict(pcm)
-        best_name = None
-        best_score = 0.0
-        for name, score in scores.items():
-            if score >= self.threshold and score > best_score:
-                best_name = name
-                best_score = float(score)
-        return best_name, best_score
+        result = self.detector.process(pcm)
+        if result >= 0:
+            return "computer", 1.0
+        return None, 0.0
 
     def reset(self):
-        for method_name in ("reset", "reset_state", "reset_states"):
-            method = getattr(self.model, method_name, None)
-            if callable(method):
-                try:
-                    method()
-                except Exception:
-                    pass
-                break
+        pass
 
 def _select_input_device_index(pa: pyaudio.PyAudio, preferred: str | None) -> int | None:
     """Resolve an input device index from an env override (index or name substring)."""
@@ -840,38 +815,16 @@ class AudioRecorderState:
     PROCESSING = 2
 
 # 1. Setup the Engine
-WAKEWORD_MODELS = _parse_comma_list(os.getenv("WAKEWORD_MODELS"))
-if not WAKEWORD_MODELS:
-    WAKEWORD_MODELS = ["hey_jarvis"]
-WAKEWORD_THRESHOLD = _get_env_float("WAKEWORD_THRESHOLD", 0.5)
-WAKEWORD_FRAME_LENGTH = _get_env_int("WAKEWORD_FRAME_LENGTH", 1280)
-WAKEWORD_SAMPLE_RATE = _get_env_int("WAKEWORD_INPUT_SAMPLE_RATE", 16000)
-if WAKEWORD_SAMPLE_RATE != 16000:
-    print(
-        "Wakeword sample rate is not 16000 Hz. "
-        "OpenWakeWord models are trained for 16 kHz audio."
-    )
+WAKEWORD_SAMPLE_RATE = 16000
+WAKEWORD_FRAME_LENGTH = 512  # Required for Porcupine
 
-wakeword_models = _resolve_wakeword_models(WAKEWORD_MODELS, REPO_ROOT)
-inference_framework = os.getenv("WAKEWORD_INFERENCE_FRAMEWORK")
-if not inference_framework:
-    if wakeword_models and all(path.lower().endswith(".onnx") for path in wakeword_models):
-        inference_framework = "onnx"
-    elif wakeword_models and all(path.lower().endswith(".tflite") for path in wakeword_models):
-        inference_framework = "tflite"
-    else:
-        inference_framework = "onnx"
-        print(
-            "⚠️  Mixed or unknown wakeword model extensions detected; "
-            "defaulting WAKEWORD_INFERENCE_FRAMEWORK=onnx"
-        )
-_ensure_openwakeword_models()
+PORCUPINE_ACCESS_KEY = os.getenv("PORCUPINE_ACCESS_KEY")
+if not PORCUPINE_ACCESS_KEY:
+    raise SystemExit("PORCUPINE_ACCESS_KEY not found in environment.")
+
+_ensure_porcupine()
 try:
-    wakeword_detector = OpenWakeWordDetector(
-        wakeword_models,
-        WAKEWORD_THRESHOLD,
-        inference_framework,
-    )
+    wakeword_detector = PorcupineDetector(PORCUPINE_ACCESS_KEY)
 except Exception as exc:
     raise SystemExit(f"Wakeword initialization failed: {exc}")
 
@@ -894,9 +847,9 @@ MAX_PRE_ROLL_FRAMES = max(1, int(SAMPLE_RATE * PRE_ROLL_SECONDS / FRAME_LENGTH))
 DEBUG_LEVELS = os.getenv("WAKEWORD_DEBUG_LEVELS", "false").lower() == "true"
 DEBUG_LEVELS_EVERY = _get_env_int("WAKEWORD_DEBUG_LEVELS_EVERY", 50)
 
-SILENCE_SECONDS = _get_env_float("WAKEWORD_SILENCE_SECONDS", 0.8)
+SILENCE_SECONDS = _get_env_float("WAKEWORD_SILENCE_SECONDS", 1.5)
 MAX_RECORD_SECONDS = _get_env_float("WAKEWORD_MAX_RECORD_SECONDS", 15.0)
-GRACE_SECONDS = _get_env_float("WAKEWORD_GRACE_SECONDS", 0.8)
+GRACE_SECONDS = _get_env_float("WAKEWORD_GRACE_SECONDS", 1.2)
 FIXED_RECORD_SECONDS = _get_env_float("WAKEWORD_FIXED_RECORD_SECONDS", 4.0)
 
 SILENCE_LIMIT_FRAMES = max(1, int(SILENCE_SECONDS * SAMPLE_RATE / FRAME_LENGTH))
@@ -960,7 +913,9 @@ try:
                 event_bus.emit("wakeword_detected", {"keyword": keyword_name, "score": keyword_score})
                 emit_state_changed(event_bus, "idle", "listening")
 
-                current_command_frames = list(pre_roll_buffer)
+                # Audio Gate: Reset buffer to exclude the wake word
+                # porcupine is precise, so we don't need pre-roll
+                current_command_frames = [] 
                 vad_silence_counter = 0
                 recording_frames = 0
                 speech_detected = False
