@@ -184,17 +184,26 @@ def _select_input_device_index(pa: pyaudio.PyAudio, preferred: str | None) -> in
     print(f"⚠️  No input device matched WAKEWORD_INPUT_DEVICE={preferred!r}")
     return None
 
-def _open_input_stream(pa: pyaudio.PyAudio, rate: int, frames_per_buffer: int, device_index: int | None):
-    kwargs = dict(
-        format=pyaudio.paInt16,
-        channels=1,
-        rate=rate,
-        input=True,
-        frames_per_buffer=frames_per_buffer,
-    )
-    if device_index is not None:
-        kwargs["input_device_index"] = device_index
-    return pa.open(**kwargs)
+def _open_input_stream(pa: pyaudio.PyAudio, preferred_rate: int, frames_per_buffer: int, device_index: int | None):
+    rates = [preferred_rate, 44100, 48000]
+    for rate in rates:
+        try:
+            kwargs = dict(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=rate,
+                input=True,
+                frames_per_buffer=int(frames_per_buffer * (rate / preferred_rate)),
+            )
+            if device_index is not None:
+                kwargs["input_device_index"] = device_index
+            stream = pa.open(**kwargs)
+            print(f"🎤 Audio stream opened at {rate}Hz")
+            return stream, rate
+        except Exception as e:
+            if rate == rates[-1]:
+                raise
+            print(f"⚠️  Rate {rate}Hz not supported, trying next... ({e})")
 
 CONVERSATION_ENABLED = os.getenv("CONVERSATION_ENABLED", "true").lower() == "true"
 CONVERSATION_MAX_TURNS = _get_env_int("CONVERSATION_MAX_TURNS", 6)
@@ -208,6 +217,20 @@ conversation_memory = (
     if CONVERSATION_ENABLED
     else None
 )
+
+def _resample(pcm_int16, from_rate, to_rate):
+    if from_rate == to_rate:
+        return pcm_int16
+    if from_rate % to_rate == 0:
+        factor = from_rate // to_rate
+        return pcm_int16[::factor]
+    # General case using linear interpolation
+    target_len = int(len(pcm_int16) * (to_rate / from_rate))
+    return np.interp(
+        np.linspace(0, len(pcm_int16), target_len, endpoint=False),
+        np.arange(len(pcm_int16)),
+        pcm_int16
+    ).astype(np.int16)
 
 # === Global Event Bus ===
 # UI clients can subscribe to receive real-time updates
@@ -835,17 +858,13 @@ except Exception as exc:
 # 2. Setup the Microphone Stream (Open once, never close during runtime)
 pa = pyaudio.PyAudio()
 INPUT_DEVICE_INDEX = _select_input_device_index(pa, os.getenv("WAKEWORD_INPUT_DEVICE"))
-audio_stream = pa.open(
-    rate=WAKEWORD_SAMPLE_RATE,
-    channels=1,
-    format=pyaudio.paInt16,
-    input=True,
-    frames_per_buffer=WAKEWORD_FRAME_LENGTH,
-    input_device_index=INPUT_DEVICE_INDEX
+audio_stream, ACTUAL_SAMPLE_RATE = _open_input_stream(
+    pa, WAKEWORD_SAMPLE_RATE, WAKEWORD_FRAME_LENGTH, INPUT_DEVICE_INDEX
 )
 
 FRAME_LENGTH = WAKEWORD_FRAME_LENGTH
-SAMPLE_RATE = WAKEWORD_SAMPLE_RATE
+SAMPLE_RATE = WAKEWORD_SAMPLE_RATE  # This is the rate the rest of the app expects (16k)
+MIC_READ_SAMPLES = int(FRAME_LENGTH * (ACTUAL_SAMPLE_RATE / SAMPLE_RATE))
 PRE_ROLL_SECONDS = _get_env_float("WAKEWORD_PRE_ROLL_SECONDS", 1.5)
 MAX_PRE_ROLL_FRAMES = max(1, int(SAMPLE_RATE * PRE_ROLL_SECONDS / FRAME_LENGTH))
 DEBUG_LEVELS = os.getenv("WAKEWORD_DEBUG_LEVELS", "false").lower() == "true"
@@ -885,7 +904,12 @@ try:
         # 1. READ AUDIO (Non-blocking / Low Latency)
         # -----------------------------------------------------
         try:
-            pcm_bytes = audio_stream.read(FRAME_LENGTH, exception_on_overflow=False)
+            pcm_raw = audio_stream.read(MIC_READ_SAMPLES, exception_on_overflow=False)
+            pcm_int16 = np.frombuffer(pcm_raw, dtype=np.int16)
+            # Resample to 16kHz if necessary
+            if ACTUAL_SAMPLE_RATE != SAMPLE_RATE:
+                pcm_int16 = _resample(pcm_int16, ACTUAL_SAMPLE_RATE, SAMPLE_RATE)
+            pcm_bytes = pcm_int16.tobytes()
         except IOError:
             continue
 
