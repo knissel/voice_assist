@@ -25,9 +25,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Resolve config path relative to this script
+# Resolve config path relative to this script, allow override via env var
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "config.yaml")
+DEFAULT_CONFIG = os.path.join(BASE_DIR, "config.yaml")
+CONFIG_PATH = os.getenv("OPS_CONFIG", DEFAULT_CONFIG)
 
 class ServiceConfig(BaseModel):
     type: str # 'powershell', 'systemd', 'process'
@@ -51,6 +52,46 @@ def load_config() -> Dict[str, dict]:
 @app.get("/health")
 def health_check():
     return {"status": "ok", "agent": "voice-assist-ops-agent"}
+
+@app.get("/env")
+def get_env():
+    """Reads the .env file from the repo root."""
+    env_path = os.path.join(BASE_DIR, "..", "..", ".env")
+    if not os.path.exists(env_path):
+        return {}
+    
+    env_data = {}
+    try:
+        with open(env_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, val = line.split("=", 1)
+                    env_data[key.strip()] = val.strip()
+    except Exception as e:
+        logger.error(f"Failed to read .env: {e}")
+        raise HTTPException(status_code=500, detail="Failed to read .env")
+    
+    return env_data
+
+@app.post("/env")
+def update_env(env_vars: Dict[str, str]):
+    """Updates the .env file in the repo root."""
+    env_path = os.path.join(BASE_DIR, "..", "..", ".env")
+    try:
+        # Read existing to preserve comments? 
+        # For simplicity, we'll overwrite or append.
+        # Let's just overwrite with the provided dict for clean management.
+        with open(env_path, "w") as f:
+            for key, val in env_vars.items():
+                f.write(f"{key}={val}\n")
+        logger.info(".env file updated via agent")
+        return {"status": "success", "message": ".env updated"}
+    except Exception as e:
+        logger.error(f"Failed to write .env: {e}")
+        raise HTTPException(status_code=500, detail="Failed to write .env")
 
 @app.get("/services", response_model=List[ServiceStatus])
 def list_services():

@@ -1,0 +1,19 @@
+[Unit]
+Description=Voice Assistant Ops Agent
+After=network.target
+
+[Service]
+Type=simple
+User=knissel
+Group=knissel
+WorkingDirectory=/home/knissel/voice_assist
+Environment=PATH=/home/knissel/voice_assist/.venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+Environment=OPS_CONFIG=/home/knissel/voice_assist/services/ops_agent/config_pi.yaml
+# Force agent to use the Pi config
+ExecStart=/home/knissel/voice_assist/.venv/bin/python services/ops_agent/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

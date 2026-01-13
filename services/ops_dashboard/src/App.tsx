@@ -17,12 +17,14 @@ interface Node {
 
 const DASHBOARD_NODES = [
   { id: '5090', name: 'RTX 5090 (Compute)', url: 'http://192.168.20.148:8010' },
-  // { id: 'pi', name: 'Raspberry Pi', url: 'http://pi.local:8010' },
+  { id: 'pi', name: 'Raspberry Pi (Edge)', url: 'http://voice-pi.local:8010' },
   // { id: 'minipc', name: 'Mini PC', url: 'http://minipc.local:8010' },
 ];
 
 function App() {
   const [nodes, setNodes] = useState<Node[]>([]);
+  const [envData, setEnvData] = useState<Record<string, Record<string, string>>>({});
+  const [expandedNode, setExpandedNode] = useState<string | null>(null);
 
   const fetchNodeData = async (nodeMeta: { id: string, name: string, url: string }) => {
     try {
@@ -32,6 +34,33 @@ function App() {
       return { ...nodeMeta, services, isOnline: true };
     } catch (err) {
       return { ...nodeMeta, services: [], isOnline: false };
+    }
+  };
+
+  const fetchEnv = async (nodeUrl: string, nodeId: string) => {
+    try {
+      const resp = await fetch(`${nodeUrl}/env`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setEnvData(prev => ({ ...prev, [nodeId]: data }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch env', err);
+    }
+  };
+
+  const saveEnv = async (nodeUrl: string, nodeId: string) => {
+    try {
+      const resp = await fetch(`${nodeUrl}/env`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(envData[nodeId])
+      });
+      if (resp.ok) {
+        alert('Environment updated successfully');
+      }
+    } catch (err) {
+      alert('Failed to save environment');
     }
   };
 
@@ -65,6 +94,38 @@ function App() {
     } catch (err) {
       alert('Deploy failed');
     }
+  };
+
+  const updateEnvKey = (nodeId: string, oldKey: string, newKey: string) => {
+    setEnvData(prev => {
+      const nodeEnv = { ...prev[nodeId] };
+      const val = nodeEnv[oldKey];
+      delete nodeEnv[oldKey];
+      nodeEnv[newKey] = val;
+      return { ...prev, [nodeId]: nodeEnv };
+    });
+  };
+
+  const updateEnvVal = (nodeId: string, key: string, val: string) => {
+    setEnvData(prev => ({
+      ...prev,
+      [nodeId]: { ...prev[nodeId], [key]: val }
+    }));
+  };
+
+  const addEnvRow = (nodeId: string) => {
+    setEnvData(prev => ({
+      ...prev,
+      [nodeId]: { ...prev[nodeId], '': '' }
+    }));
+  };
+
+  const deleteEnvRow = (nodeId: string, key: string) => {
+    setEnvData(prev => {
+      const nodeEnv = { ...prev[nodeId] };
+      delete nodeEnv[key];
+      return { ...prev, [nodeId]: nodeEnv };
+    });
   };
 
   return (
@@ -104,10 +165,50 @@ function App() {
                       </div>
                     </div>
                   ))}
-                  <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--glass-border)', paddingTop: '1rem' }}>
-                    <button className="deploy-btn" onClick={() => handleDeploy(node.url)}>
-                      🚀 One-Click Deploy
-                    </button>
+
+                  <button className="deploy-btn" onClick={() => handleDeploy(node.url)}>
+                    🚀 One-Click Deploy
+                  </button>
+
+                  <div className="env-editor">
+                    <div className="env-header">
+                      <h3>Environment Variables</h3>
+                      <button onClick={() => {
+                        if (expandedNode === node.id) setExpandedNode(null);
+                        else {
+                          setExpandedNode(node.id);
+                          if (!envData[node.id]) fetchEnv(node.url, node.id);
+                        }
+                      }}>
+                        {expandedNode === node.id ? 'Collapse' : 'Manage'}
+                      </button>
+                    </div>
+
+                    {expandedNode === node.id && (
+                      <>
+                        <div className="env-grid">
+                          {Object.entries(envData[node.id] || {}).map(([key, val]) => (
+                            <div key={key} className="env-row">
+                              <input
+                                placeholder="KEY"
+                                value={key}
+                                onChange={(e) => updateEnvKey(node.id, key, e.target.value)}
+                              />
+                              <input
+                                placeholder="VALUE"
+                                value={val}
+                                onChange={(e) => updateEnvVal(node.id, key, e.target.value)}
+                              />
+                              <button style={{ padding: '0.2rem 0.5rem', background: 'transparent' }} onClick={() => deleteEnvRow(node.id, key)}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="env-actions">
+                          <button onClick={() => addEnvRow(node.id)}>+ Add Var</button>
+                          <button className="primary" onClick={() => saveEnv(node.url, node.id)}>Save Config</button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </>
               ) : (

@@ -1,0 +1,18 @@
+[Unit]
+Description=Voice Assistant Legacy Wakeword
+After=network.target
+
+[Service]
+Type=simple
+User=knissel
+Group=knissel
+WorkingDirectory=/home/knissel/voice_assist
+Environment=PATH=/home/knissel/voice_assist/.venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+# Legacy wakeword is in legacy/
+ExecStart=/home/knissel/voice_assist/.venv/bin/python legacy/wakeword.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+# services/ops_agent/config_pi.yaml
+
+# Defines the services this agent is responsible for managing on the Raspberry Pi node.
+# The dashboard will query this config to know what buttons to show.
+
+services:
+  wakeword_legacy:
+    type: systemd
+    service_name: voice-assist-wakeword
+    # Optional health check for the wakeword (if it had a status endpoint)
+    # check_url: "http://localhost:8011/health"
+
+  ui_server:
+    type: systemd
+    service_name: voice-assist-ui-server
+    check_url: "http://localhost:8765"
