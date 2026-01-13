@@ -10,9 +10,13 @@ WorkingDirectory=/home/knissel/voice_assist
 Environment=PATH=/home/knissel/voice_assist/.venv/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONUNBUFFERED=1
 # Legacy wakeword is in legacy/
+ExecStartPre=-/usr/bin/pkill -f wakeword.py
+ExecStartPre=-/usr/bin/rm -f /tmp/voice_assist_wakeword.pid
 ExecStart=/home/knissel/voice_assist/.venv/bin/python legacy/wakeword.py
 Restart=always
 RestartSec=5
+ExecStopPost=-/usr/bin/pkill -f wakeword.py
+ExecStopPost=-/usr/bin/rm -f /tmp/voice_assist_wakeword.pid
 
 [Install]
 WantedBy=multi-user.target

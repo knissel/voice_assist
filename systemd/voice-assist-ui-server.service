@@ -10,9 +10,13 @@ WorkingDirectory=/home/knissel/voice_assist
 Environment=PATH=/home/knissel/voice_assist/.venv/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONUNBUFFERED=1
 # Legacy UI server is in legacy/
+ExecStartPre=-/usr/bin/fuser -k 8765/tcp
+ExecStartPre=-/usr/bin/fuser -k 8766/tcp
 ExecStart=/home/knissel/voice_assist/.venv/bin/python legacy/ui_server.py
 Restart=always
 RestartSec=5
+ExecStopPost=-/usr/bin/fuser -k 8765/tcp
+ExecStopPost=-/usr/bin/fuser -k 8766/tcp
 
 [Install]
 WantedBy=multi-user.target

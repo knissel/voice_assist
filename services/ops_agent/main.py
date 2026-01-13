@@ -207,11 +207,13 @@ def deploy_updates():
     Pulls the latest code from git and restarts all managed services.
     """
     try:
-        # 1. Git Pull
-        # Assuming the agent is running from within the repo
-        logger.info("Executing git pull...")
-        pull_res = subprocess.run(["git", "pull"], capture_output=True, text=True, check=True)
-        logger.info(f"Git pull result: {pull_res.stdout}")
+        # 1. Git Pull / Force Update
+        # Using fetch + reset --hard ensures local changes on the Pi (like edits to setup_pi.sh) 
+        # don't block the deployment.
+        logger.info("Executing git fetch and hard reset...")
+        subprocess.run(["git", "fetch", "--all"], check=True)
+        pull_res = subprocess.run(["git", "reset", "--hard", "origin/main"], capture_output=True, text=True, check=True)
+        logger.info(f"Git reset result: {pull_res.stdout}")
 
         # 2. Restart Services
         config = load_config()
