@@ -1414,6 +1414,9 @@
                 case 'timer_cancelled':
                     removeTimer(event.data.id);
                     break;
+                case 'ui_reload':
+                    window.location.reload();
+                    break;
                 case 'error':
                     addMessage('assistant', `WARN: ${event.data.message}`);
                     break;

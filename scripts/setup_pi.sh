@@ -14,6 +14,7 @@ echo "🔗 Creating systemd symlinks..."
 sudo ln -sf "$REPO_DIR/systemd/voice-assist-ops-agent.service" "$SYSTEMD_DIR/"
 sudo ln -sf "$REPO_DIR/systemd/voice-assist-wakeword.service" "$SYSTEMD_DIR/"
 sudo ln -sf "$REPO_DIR/systemd/voice-assist-ui-server.service" "$SYSTEMD_DIR/"
+sudo ln -sf "$REPO_DIR/systemd/voice-assist-browser.service" "$SYSTEMD_DIR/"
 
 # 2. Reload systemd
 echo "🔄 Reloading systemd..."
@@ -24,6 +25,7 @@ echo "⚡ Enabling services..."
 sudo systemctl enable voice-assist-ops-agent
 sudo systemctl enable voice-assist-wakeword
 sudo systemctl enable voice-assist-ui-server
+sudo systemctl enable voice-assist-browser
 
 # 4. Allow ops-agent to manage services without sudo password
 echo "🔑 Configuring passwordless sudo for systemctl..."

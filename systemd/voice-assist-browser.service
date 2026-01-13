@@ -1,0 +1,16 @@
+[Unit]
+Description=Voice Assistant Kiosk Browser
+After=graphical.target voice-assist-ui-server.service
+
+[Service]
+Environment=DISPLAY=:0
+# Requires a logged-in user or a display manager
+User=knissel
+# The exact command from the user's .desktop file
+ExecStartPre=-/usr/bin/pkill chromium
+ExecStart=/usr/bin/chromium-browser --kiosk --no-first-run --disable-infobars --autoplay-policy=no-user-gesture-required http://localhost:8765
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

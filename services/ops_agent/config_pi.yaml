@@ -14,3 +14,7 @@ services:
     type: systemd
     service_name: voice-assist-ui-server
     check_url: "http://localhost:8765"
+
+  kiosk_browser:
+    type: systemd
+    service_name: voice-assist-browser
