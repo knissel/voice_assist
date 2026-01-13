@@ -218,14 +218,13 @@ conversation_memory = (
     else None
 )
 
-def _resample(pcm_int16, from_rate, to_rate):
+def _resample(pcm_int16, from_rate, to_rate, target_len):
     if from_rate == to_rate:
         return pcm_int16
     if from_rate % to_rate == 0:
         factor = from_rate // to_rate
         return pcm_int16[::factor]
     # General case using linear interpolation
-    target_len = int(len(pcm_int16) * (to_rate / from_rate))
     return np.interp(
         np.linspace(0, len(pcm_int16), target_len, endpoint=False),
         np.arange(len(pcm_int16)),
@@ -864,7 +863,8 @@ audio_stream, ACTUAL_SAMPLE_RATE = _open_input_stream(
 
 FRAME_LENGTH = WAKEWORD_FRAME_LENGTH
 SAMPLE_RATE = WAKEWORD_SAMPLE_RATE  # This is the rate the rest of the app expects (16k)
-MIC_READ_SAMPLES = int(FRAME_LENGTH * (ACTUAL_SAMPLE_RATE / SAMPLE_RATE))
+# Use math.ceil to ensure we have enough samples for the resampler to produce exactly FRAME_LENGTH
+MIC_READ_SAMPLES = int(np.ceil(FRAME_LENGTH * (ACTUAL_SAMPLE_RATE / SAMPLE_RATE)))
 PRE_ROLL_SECONDS = _get_env_float("WAKEWORD_PRE_ROLL_SECONDS", 1.5)
 MAX_PRE_ROLL_FRAMES = max(1, int(SAMPLE_RATE * PRE_ROLL_SECONDS / FRAME_LENGTH))
 DEBUG_LEVELS = os.getenv("WAKEWORD_DEBUG_LEVELS", "false").lower() == "true"
@@ -906,9 +906,9 @@ try:
         try:
             pcm_raw = audio_stream.read(MIC_READ_SAMPLES, exception_on_overflow=False)
             pcm_int16 = np.frombuffer(pcm_raw, dtype=np.int16)
-            # Resample to 16kHz if necessary
+            # Resample to 16kHz if necessary, ensuring exactly FRAME_LENGTH samples
             if ACTUAL_SAMPLE_RATE != SAMPLE_RATE:
-                pcm_int16 = _resample(pcm_int16, ACTUAL_SAMPLE_RATE, SAMPLE_RATE)
+                pcm_int16 = _resample(pcm_int16, ACTUAL_SAMPLE_RATE, SAMPLE_RATE, FRAME_LENGTH)
             pcm_bytes = pcm_int16.tobytes()
         except IOError:
             continue
