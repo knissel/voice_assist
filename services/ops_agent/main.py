@@ -163,6 +163,7 @@ def manage_service(service_name: str, action: str):
     try:
         if svc_type == "systemd":
             service_sys_name = svc.get("service_name")
+            logger.info(f"Executing systemctl {action} for {service_sys_name}")
             subprocess.run(["sudo", "systemctl", action, service_sys_name], check=True)
             return {"status": "success", "action": action}
         
@@ -170,21 +171,28 @@ def manage_service(service_name: str, action: str):
             cmd = ""
             if action == "start":
                 cmd = svc.get("start_cmd")
+                logger.info(f"Starting {service_name}: {cmd}")
             elif action == "stop":
                 cmd = svc.get("stop_cmd")
+                logger.info(f"Stopping {service_name}: {cmd}")
             elif action == "restart":
-                # Naive restart
                 stop_cmd = svc.get("stop_cmd")
                 start_cmd = svc.get("start_cmd")
+                logger.info(f"Restarting {service_name}...")
                 if stop_cmd:
+                    logger.info(f"Running stop: {stop_cmd}")
+                    # Don't check return code for stop (might fail if already stopped)
                     subprocess.run(["powershell", "-Command", stop_cmd], check=False)
-                    time.sleep(2) # Give it a moment to die
+                    time.sleep(2)
                 if start_cmd:
+                    logger.info(f"Running start: {start_cmd}")
                     subprocess.run(["powershell", "-Command", start_cmd], check=True)
                 return {"status": "success", "action": "restart"}
 
             if cmd:
-                subprocess.run(["powershell", "-Command", cmd], check=True)
+                # For STOP, we don't want to error out if the process is already gone
+                is_check = (action == "start")
+                subprocess.run(["powershell", "-Command", cmd], check=is_check)
                 return {"status": "success", "action": action}
             
     except subprocess.CalledProcessError as e:

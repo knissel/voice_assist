@@ -25,6 +25,10 @@ sudo systemctl enable voice-assist-ops-agent
 sudo systemctl enable voice-assist-wakeword
 sudo systemctl enable voice-assist-ui-server
 
+# 4. Allow ops-agent to manage services without sudo password
+echo "🔑 Configuring passwordless sudo for systemctl..."
+echo "knissel ALL=(ALL) NOPASSWD: /usr/bin/systemctl start voice-assist-*, /usr/bin/systemctl stop voice-assist-*, /usr/bin/systemctl restart voice-assist-*" | sudo tee /etc/sudoers.d/voice-assist-ops
+
 # 4. Start Ops Agent (to manage the others)
 echo "▶ Starting Ops Agent..."
 # Set OPS_CONFIG in the service file update

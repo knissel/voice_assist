@@ -6,17 +6,15 @@
 services:
   whisper_server:
     type: powershell
-    # Command to start the service
-    start_cmd: "Start-Process python -ArgumentList 'whisper_server.py' -WorkingDirectory '..\\..\\' -WindowStyle Minimized"
-    # Command to stop the service (brute force for now, can be refined)
-    stop_cmd: "taskkill /F /IM python.exe /FI \"WINDOWTITLE eq whisper_server\""
-    # URL to check health (returns 200 OK)
+    # Use cmd /c to set the window title so taskkill can find it reliably
+    start_cmd: "Start-Process cmd -ArgumentList '/c title whisper_server && .\\.venv\\Scripts\\python whisper_server.py' -WorkingDirectory '..\\..\\' -WindowStyle Minimized"
+    stop_cmd: "taskkill /F /FI \"WINDOWTITLE eq whisper_server*\""
     check_url: "http://localhost:5000/health"
     
   xtts_server:
     type: powershell
-    start_cmd: "Start-Process python -ArgumentList 'xtts_server.py' -WorkingDirectory '..\\..\\' -WindowStyle Minimized"
-    stop_cmd: "taskkill /F /IM python.exe /FI \"WINDOWTITLE eq xtts_server\""
+    start_cmd: "Start-Process cmd -ArgumentList '/c title xtts_server && .\\.venv\\Scripts\\python xtts_server.py' -WorkingDirectory '..\\..\\' -WindowStyle Minimized"
+    stop_cmd: "taskkill /F /FI \"WINDOWTITLE eq xtts_server*\""
     check_url: "http://localhost:5001/health"
 
   # Example for a Systemd service (uncomment for Linux nodes)
