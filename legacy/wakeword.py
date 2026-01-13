@@ -293,13 +293,17 @@ class UIEventBridge:
 
             if message.get("type") == "tool_call":
                 data = message.get("data", {})
+                print(f"📡 UI Bridge received tool_call: {data.get('tool_name')} (origin: {data.get('origin')})")
                 if data.get("origin") != "ui":
                     continue
 
                 tool_name = data.get("tool_name")
                 args = data.get("arguments", {})
                 if not tool_name:
+                    print("⚠️  Received tool_call with no name")
                     continue
+                
+                print(f"🛠️  UI Bridge dispatching: {tool_name}")
 
                 emit_tool_call(event_bus, tool_name, args)
                 try:

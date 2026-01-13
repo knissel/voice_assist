@@ -71,6 +71,7 @@ async def handle_client_message(data: dict, websocket):
         # Forward tool calls to the assistant (wakeword bridge) for execution
         tool_name = data.get("tool")
         args = data.get("args", {})
+        print(f"📢 Broadcasting tool_call from UI: {tool_name}")
 
         await broadcast_event({
             "type": "tool_call",
