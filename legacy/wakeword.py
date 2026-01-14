@@ -182,6 +182,14 @@ def _select_input_device_index(pa: pyaudio.PyAudio, preferred: str | None) -> in
             return i
 
     print(f"⚠️  No input device matched WAKEWORD_INPUT_DEVICE={preferred!r}")
+    print("Available Input Devices:")
+    for i in range(count):
+        try:
+            info = pa.get_device_info_by_index(i)
+            if info.get("maxInputChannels", 0) > 0:
+                print(f"  [{i}] {info.get('name')}")
+        except Exception:
+            pass
     return None
 
 def _open_input_stream(pa: pyaudio.PyAudio, preferred_rate: int, frames_per_buffer: int, device_index: int | None):
