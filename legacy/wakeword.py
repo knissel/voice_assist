@@ -847,8 +847,14 @@ if not PORCUPINE_ACCESS_KEY:
 _ensure_porcupine()
 try:
     wakeword_detector = PorcupineDetector(PORCUPINE_ACCESS_KEY)
+    print(f"✅ Porcupine initialized for keyword: 'computer'")
 except Exception as exc:
-    raise SystemExit(f"Wakeword initialization failed: {exc}")
+    print(f"\n❌ PORCUPINE INIT ERROR: {exc}")
+    print("   -> Check your PORCUPINE_ACCESS_KEY.")
+    print("   -> If your key is restricted to Raspberry Pi, this script will NOT work on Windows.")
+    print("   -> Verify 'computer' is a valid keyword for this platform.\n")
+    # Determine if we should crash or fallback. For now, we crash to avoid silent failures.
+    raise SystemExit("Wakeword initialization failed. See error above.")
 
 # 2. Setup the Microphone Stream (Open once, never close during runtime)
 pa = pyaudio.PyAudio()
