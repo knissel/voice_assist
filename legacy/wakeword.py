@@ -988,7 +988,8 @@ try:
 
             if vad_available:
                 audio_int16 = np.frombuffer(pcm_bytes, dtype=np.int16)
-                vad_tensor[:] = torch.from_numpy(audio_int16.astype(np.float32) * VAD_NORMALIZE)
+                # Normalize inline to avoid NameError if VAD_NORMALIZE is missing.
+                vad_tensor[:] = torch.from_numpy(audio_int16.astype(np.float32) * (1.0 / 32768.0))
                 try:
                     speech_prob = vad_model(vad_tensor, SAMPLE_RATE).item()
                     if speech_prob >= 0.5:
@@ -1016,7 +1017,7 @@ try:
                 temp_audio_path = os.path.join(temp_dir, f"cmd_{int(time.time())}.wav")
                 with wave.open(temp_audio_path, 'wb') as wf:
                     wf.setnchannels(1)
-                    wf.setsampwidth(pa.get_sample_size(pyaudio.paInt16))
+                    wf.setsampwidth(pyaudio.get_sample_size(pyaudio.paInt16))
                     wf.setframerate(SAMPLE_RATE)
                     wf.writeframes(b''.join(current_command_frames))
 
