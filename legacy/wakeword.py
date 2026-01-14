@@ -865,32 +865,47 @@ except Exception as exc:
     raise SystemExit("Wakeword initialization failed. See error above.")
 
 # 2. Setup the Microphone Stream (Open once, never close during runtime)
-pa = pyaudio.PyAudio()
-INPUT_DEVICE_INDEX = _select_input_device_index(pa, os.getenv("WAKEWORD_INPUT_DEVICE"))
-audio_stream, ACTUAL_SAMPLE_RATE = _open_input_stream(
-    pa, WAKEWORD_SAMPLE_RATE, WAKEWORD_FRAME_LENGTH, INPUT_DEVICE_INDEX
-)
+# 2. Setup the Microphone Stream with PvRecorder
+from pvrecorder import PvRecorder
 
+# Find device index manually or let PvRecorder list them
+recorder_devices = PvRecorder.get_available_devices()
+recorder_index = -1
+preferred_device = os.getenv("WAKEWORD_INPUT_DEVICE")
+
+if preferred_device:
+    needle = preferred_device.lower()
+    for i, name in enumerate(recorder_devices):
+        if needle in name.lower():
+            recorder_index = i
+            print(f"🎤 Using PvRecorder device index {i}: {name}")
+            break
+    if recorder_index == -1:
+        print(f"⚠️  No PvRecorder device matched: {preferred_device!r}")
+        print("Available Devices:")
+        for i, name in enumerate(recorder_devices):
+            print(f"  [{i}] {name}")
+else:
+    print("🎤 Using default PvRecorder device")
+
+try:
+    recorder = PvRecorder(device_index=recorder_index, frame_length=WAKEWORD_FRAME_LENGTH)
+    recorder.start()
+    print(f"🎤 PvRecorder started (Sample Rate: {recorder.sample_rate}Hz)")
+except Exception as e:
+    raise SystemExit(f"Failed to start PvRecorder: {e}")
+
+SAMPLE_RATE = recorder.sample_rate # Should match Porcupine (16000)
 FRAME_LENGTH = WAKEWORD_FRAME_LENGTH
-SAMPLE_RATE = WAKEWORD_SAMPLE_RATE  # This is the rate the rest of the app expects (16k)
-# Use math.ceil to ensure we have enough samples for the resampler to produce exactly FRAME_LENGTH
-MIC_READ_SAMPLES = int(np.ceil(FRAME_LENGTH * (ACTUAL_SAMPLE_RATE / SAMPLE_RATE)))
+
+# Recalculate buffer sizes based on actual recorder rate (usually 16000)
 PRE_ROLL_SECONDS = _get_env_float("WAKEWORD_PRE_ROLL_SECONDS", 1.5)
 MAX_PRE_ROLL_FRAMES = max(1, int(SAMPLE_RATE * PRE_ROLL_SECONDS / FRAME_LENGTH))
-DEBUG_LEVELS = os.getenv("WAKEWORD_DEBUG_LEVELS", "false").lower() == "true"
-DEBUG_LEVELS_EVERY = _get_env_int("WAKEWORD_DEBUG_LEVELS_EVERY", 50)
-
-SILENCE_SECONDS = _get_env_float("WAKEWORD_SILENCE_SECONDS", 1.5)
-MAX_RECORD_SECONDS = _get_env_float("WAKEWORD_MAX_RECORD_SECONDS", 15.0)
-GRACE_SECONDS = _get_env_float("WAKEWORD_GRACE_SECONDS", 1.2)
-FIXED_RECORD_SECONDS = _get_env_float("WAKEWORD_FIXED_RECORD_SECONDS", 4.0)
-
 SILENCE_LIMIT_FRAMES = max(1, int(SILENCE_SECONDS * SAMPLE_RATE / FRAME_LENGTH))
 MAX_RECORD_FRAMES = max(1, int(MAX_RECORD_SECONDS * SAMPLE_RATE / FRAME_LENGTH))
 GRACE_FRAMES = max(1, int(GRACE_SECONDS * SAMPLE_RATE / FRAME_LENGTH))
 NO_SPEECH_FRAMES = max(1, GRACE_FRAMES * 2)
 FIXED_RECORD_FRAMES = max(1, int(FIXED_RECORD_SECONDS * SAMPLE_RATE / FRAME_LENGTH))
-VAD_NORMALIZE = 1.0 / 32768.0
 
 print(f"👂 High-Performance Loop Started. Pre-roll buffer: {MAX_PRE_ROLL_FRAMES} frames")
 
@@ -911,16 +926,14 @@ assistant_worker.start()
 try:
     while True:
         # -----------------------------------------------------
-        # 1. READ AUDIO (Non-blocking / Low Latency)
+        # 1. READ AUDIO (Non-blocking usually, but PvRecorder blocks for frame)
         # -----------------------------------------------------
         try:
-            pcm_raw = audio_stream.read(MIC_READ_SAMPLES, exception_on_overflow=False)
-            pcm_int16 = np.frombuffer(pcm_raw, dtype=np.int16)
-            # Resample to 16kHz if necessary, ensuring exactly FRAME_LENGTH samples
-            if ACTUAL_SAMPLE_RATE != SAMPLE_RATE:
-                pcm_int16 = _resample(pcm_int16, ACTUAL_SAMPLE_RATE, SAMPLE_RATE, FRAME_LENGTH)
-            pcm_bytes = pcm_int16.tobytes()
-        except IOError:
+            pcm = recorder.read()
+            # pcm is List[int], convert to bytes for buffer/vad
+            pcm_bytes = struct.pack(f"{len(pcm)}h", *pcm)
+        except Exception as e:
+            print(f"Recorder error: {e}")
             continue
 
         pre_roll_buffer.append(pcm_bytes)
