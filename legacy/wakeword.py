@@ -1,4 +1,5 @@
 import asyncio
+import struct
 import collections
 import json
 import pyaudio
