@@ -650,7 +650,8 @@ class AssistantWorker:
             home_keywords = ['light', 'lights', 'lamp', 'brightness', 'dim', 'bright', 'turn on',
                            'turn off', 'kitchen', 'family room', 'foyer', 'stairs', 'island',
                            'bluetooth', 'connect', 'disconnect', 'volume', 'music', 'play', 'stop',
-                           'timer', 'alarm', 'remind', 'minutes', 'seconds', 'hours', 'cancel timer']
+                           'timer', 'alarm', 'remind', 'minutes', 'seconds', 'hours', 'cancel timer',
+                           'calendar', 'event', 'agenda', 'schedule', 'meeting', 'appointment']
             needs_tools = any(kw in user_command.lower() for kw in home_keywords)
             
             if conversation_memory:
@@ -692,6 +693,10 @@ For lighting commands, IMMEDIATELY call control_home_lighting function with NO e
 Device IDs: Kitchen Cans=85, Foyer=87, Stairs=89, Upstairs Hall=91, Front Door=93, Kitchen Island=95, Downstairs Hallway=97, Upstairs Deck=99, Family Room=204, Breakfast=206.
 For ALL lights: use device_id=999 with brightness=100 (ON) or brightness=0 (OFF).
 For pizza dough recipes or hydration adjustments, call pizza_dough_recipe with the requested parameters.
+
+For calendar/agenda/schedule requests, call get_calendar_agenda or add_calendar_event.
+- get_calendar_agenda: Use when="today" or when="week" to get upcoming events.
+- add_calendar_event: ALWAYS call this function to add events. Required: title, start_iso, end_iso in ISO8601 format (e.g., 2026-01-15T14:00:00-05:00). Today's date is provided in user context.
 
 IMPORTANT: Your responses will be spoken aloud via text-to-speech. Format for natural speech:
 - Say "high of 58" not "58°F" or "58 degrees F"
