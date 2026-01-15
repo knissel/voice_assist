@@ -11,6 +11,13 @@ from tools.audio import route_to_bluetooth, set_audio_sink, get_audio_sinks, con
 from tools.youtube_music import play_youtube_music, stop_music
 from tools.timer import set_timer, cancel_timer, list_timers, check_timer
 from tools.recipes import pizza_dough_recipe
+try:
+    from tools.calendar import tool_get_agenda, tool_add_event
+except Exception as exc:
+    def tool_get_agenda(when: str = "today"):
+        return f"Calendar unavailable: {exc}"
+    def tool_add_event(title: str, start_iso: str, end_iso: str, description: str = "", location: str = ""):
+        return f"Calendar unavailable: {exc}"
 
 # Tool specifications in Gemini format
 GEMINI_TOOLS = [
@@ -189,6 +196,32 @@ GEMINI_TOOLS = [
                         "use_last": types.Schema(type="BOOLEAN", description="Use last recipe as base when fields are omitted")
                     },
                     required=[]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="get_calendar_agenda",
+                description="Get the user's calendar agenda for today or this week. Returns a list of events with times and titles.",
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "when": types.Schema(type="STRING", description="Time period: 'today' or 'week'. Defaults to 'today'.")
+                    },
+                    required=[]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="add_calendar_event",
+                description="Add a new event to the user's Google Calendar.",
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "title": types.Schema(type="STRING", description="Title/summary of the event"),
+                        "start_iso": types.Schema(type="STRING", description="Start time in ISO8601 format (e.g., 2026-01-15T14:00:00-05:00)"),
+                        "end_iso": types.Schema(type="STRING", description="End time in ISO8601 format"),
+                        "description": types.Schema(type="STRING", description="Optional description for the event"),
+                        "location": types.Schema(type="STRING", description="Optional location for the event")
+                    },
+                    required=["title", "start_iso", "end_iso"]
                 )
             )
         ]
@@ -420,6 +453,56 @@ TOOL_SPECS = [
                 "required": []
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_calendar_agenda",
+            "description": "Get the user's calendar agenda for today or this week.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "when": {
+                        "type": "string",
+                        "description": "Time period: 'today' or 'week'. Defaults to 'today'."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_calendar_event",
+            "description": "Add a new event to the user's Google Calendar.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Title/summary of the event"
+                    },
+                    "start_iso": {
+                        "type": "string",
+                        "description": "Start time in ISO8601 format"
+                    },
+                    "end_iso": {
+                        "type": "string",
+                        "description": "End time in ISO8601 format"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional description for the event"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "Optional location for the event"
+                    }
+                },
+                "required": ["title", "start_iso", "end_iso"]
+            }
+        }
     }
 ]
 
@@ -439,7 +522,9 @@ TOOL_FUNCTIONS = {
     "cancel_timer": cancel_timer,
     "check_timer": check_timer,
     "list_timers": list_timers,
-    "pizza_dough_recipe": pizza_dough_recipe
+    "pizza_dough_recipe": pizza_dough_recipe,
+    "get_calendar_agenda": tool_get_agenda,
+    "add_calendar_event": tool_add_event
 }
 
 def dispatch_tool(name: str, args: dict) -> str:

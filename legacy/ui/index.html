@@ -575,6 +575,142 @@
             display: none;
         }
 
+        /* Calendar Modal */
+        .calendar-modal {
+            max-height: 80vh;
+            width: 95%;
+            max-width: 500px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .calendar-events-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 50vh;
+            margin-bottom: 16px;
+        }
+
+        .calendar-event {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 14px 16px;
+            border-left: 4px solid var(--accent-cyan);
+        }
+
+        .calendar-event.all-day {
+            border-left-color: var(--accent-purple);
+        }
+
+        .event-time {
+            font-size: 12px;
+            color: var(--accent-cyan);
+            font-weight: 600;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .event-time-icon {
+            width: 14px;
+            height: 14px;
+        }
+
+        .event-title {
+            font-size: 15px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .event-location {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .no-events {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+            text-align: center;
+            gap: 12px;
+        }
+
+        .no-events-icon {
+            font-size: 48px;
+            opacity: 0.5;
+        }
+
+        .calendar-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        .calendar-loading::after {
+            content: '';
+            width: 24px;
+            height: 24px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-cyan);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 12px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .calendar-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .calendar-tab {
+            flex: 1;
+            padding: 10px 16px;
+            background: var(--bg-card);
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .calendar-tab.active {
+            background: var(--accent-cyan);
+            border-color: var(--accent-cyan);
+            color: var(--bg-primary);
+        }
+
+        .calendar-tab:active {
+            transform: scale(0.98);
+        }
+
+        .calendar-error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--accent-red);
+            border-radius: 12px;
+            padding: 16px;
+            color: var(--accent-red);
+            text-align: center;
+            font-size: 14px;
+        }
+
         /* Recipe Panel */
         .recipe-panel {
             background: var(--bg-secondary);
@@ -1271,6 +1407,24 @@
 
     </div>
 
+    <!-- Calendar Modal -->
+    <div class="modal-overlay" id="calendarModal">
+        <div class="modal calendar-modal">
+            <h3 class="modal-title">📅 Your Agenda</h3>
+            <div class="calendar-tabs">
+                <button class="calendar-tab active" id="tabToday" onclick="fetchCalendarEvents('today')">Today</button>
+                <button class="calendar-tab" id="tabWeek" onclick="fetchCalendarEvents('week')">This Week</button>
+            </div>
+            <div class="calendar-events-list" id="calendarEventsList">
+                <div class="calendar-loading">Loading events</div>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn cancel" onclick="closeCalendarModal()">Close</button>
+                <button class="modal-btn confirm" onclick="fetchCalendarEvents()">🔄 Refresh</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Timer Modal -->
     <div class="modal-overlay" id="timerModal">
         <div class="modal">
@@ -1921,8 +2075,111 @@
             }
         }
 
+        // Calendar functions
+        let calendarWhen = 'today';
+
         function openCalendar() {
-            addMessage('assistant', 'Calendar tool is coming soon!');
+            document.getElementById('calendarModal').classList.add('active');
+            fetchCalendarEvents('today');
+        }
+
+        function closeCalendarModal() {
+            document.getElementById('calendarModal').classList.remove('active');
+        }
+
+        async function fetchCalendarEvents(when = calendarWhen) {
+            calendarWhen = when;
+            const eventsList = document.getElementById('calendarEventsList');
+            const tabToday = document.getElementById('tabToday');
+            const tabWeek = document.getElementById('tabWeek');
+
+            // Update tab state
+            tabToday.classList.toggle('active', when === 'today');
+            tabWeek.classList.toggle('active', when === 'week');
+
+            // Show loading
+            eventsList.innerHTML = '<div class="calendar-loading">Loading events</div>';
+
+            try {
+                const response = await fetch(`/api/calendar/agenda?when=${when}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    eventsList.innerHTML = `<div class="calendar-error">⚠️ ${data.error}</div>`;
+                    return;
+                }
+
+                if (!data.events || data.events.length === 0) {
+                    const period = when === 'today' ? 'today' : 'this week';
+                    eventsList.innerHTML = `
+                        <div class="no-events">
+                            <div class="no-events-icon">📅</div>
+                            <div>No events ${period}</div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">
+                                Your calendar is clear!
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                // Render events
+                eventsList.innerHTML = data.events.map(event => {
+                    const isAllDay = !event.start.includes('T');
+                    const timeStr = isAllDay ? 'All Day' : formatEventTime(event.start, event.end);
+                    const locationHtml = event.location 
+                        ? `<div class="event-location">📍 ${escapeHtml(event.location)}</div>` 
+                        : '';
+
+                    return `
+                        <div class="calendar-event ${isAllDay ? 'all-day' : ''}">
+                            <div class="event-time">
+                                <svg class="event-time-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <path d="M12 6v6l4 2"></path>
+                                </svg>
+                                ${timeStr}
+                            </div>
+                            <div class="event-title">${escapeHtml(event.title)}</div>
+                            ${locationHtml}
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (err) {
+                console.error('Calendar fetch error:', err);
+                eventsList.innerHTML = `
+                    <div class="calendar-error">
+                        ⚠️ Failed to load calendar<br>
+                        <small>Check that the calendar module is configured</small>
+                    </div>
+                `;
+            }
+        }
+
+        function formatEventTime(startIso, endIso) {
+            try {
+                const start = new Date(startIso);
+                const end = new Date(endIso);
+                const opts = { hour: 'numeric', minute: '2-digit', hour12: true };
+                const startStr = start.toLocaleTimeString('en-US', opts);
+                const endStr = end.toLocaleTimeString('en-US', opts);
+                
+                // Include date if it's the week view
+                if (calendarWhen === 'week') {
+                    const dateStr = start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                    return `${dateStr} · ${startStr} - ${endStr}`;
+                }
+                return `${startStr} - ${endStr}`;
+            } catch (e) {
+                return startIso;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // Initialize

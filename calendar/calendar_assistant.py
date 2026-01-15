@@ -20,6 +20,25 @@ load_dotenv()
 SCOPES = ["https://www.googleapis.com/auth/calendar"]  # read + write
 TIMEZONE = os.getenv("TIMEZONE", "America/New_York")
 
+# Determine credentials directory - defaults to calendar/ in project root
+def _get_credentials_dir() -> str:
+    """Get the directory containing credentials.json and token.json."""
+    # First check for explicit env var
+    creds_dir = os.getenv("CALENDAR_CREDENTIALS_DIR")
+    if creds_dir and os.path.isdir(creds_dir):
+        return creds_dir
+    
+    # Default to calendar/ directory relative to this file
+    return os.path.dirname(os.path.abspath(__file__))
+
+def _get_credentials_path() -> str:
+    """Get full path to credentials.json."""
+    return os.path.join(_get_credentials_dir(), "credentials.json")
+
+def _get_token_path() -> str:
+    """Get full path to token.json."""
+    return os.path.join(_get_credentials_dir(), "token.json")
+
 
 # --------------------------------------------------
 # GOOGLE CALENDAR AUTH
@@ -31,18 +50,21 @@ def get_calendar_service():
     Uses OAuth2 with token.json to cache credentials.
     """
     creds = None
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    token_path = _get_token_path()
+    credentials_path = _get_credentials_path()
+    
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
-                "credentials.json", SCOPES
+                credentials_path, SCOPES
             )
             creds = flow.run_local_server(port=0)
-        with open("token.json", "w") as token:
+        with open(token_path, "w") as token:
             token.write(creds.to_json())
 
     service = build("calendar", "v3", credentials=creds)

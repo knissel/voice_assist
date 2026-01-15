@@ -61,3 +61,7 @@ piper_models/
 deploy.config
 xtts_server.err
 whisper_server.err
+
+# Google Calendar OAuth credentials
+calendar/credentials.json
+calendar/token.json
