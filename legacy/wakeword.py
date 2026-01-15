@@ -662,8 +662,11 @@ class AssistantWorker:
             use_history = conversation_memory is not None and not needs_tools
             contents = _build_llm_contents(user_command, use_history)
 
-            # Location context
-            location_context = "User is located in Charlotte, NC (zip code 28211)."
+            # Location and time context
+            from datetime import datetime
+            now = datetime.now()
+            date_context = now.strftime("Today is %A, %B %d, %Y. Current time is %I:%M %p. Timezone is EST (-05:00).")
+            location_context = f"User is located in Charlotte, NC (zip code 28211). {date_context}"
             
             if needs_search and not needs_tools:
                 # Use Google Search for real-time info
