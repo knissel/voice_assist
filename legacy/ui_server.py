@@ -61,14 +61,18 @@ class UIHTTPHandler(SimpleHTTPRequestHandler):
         path = parsed.path
         query = parse_qs(parsed.query)
         
-        # API Routes
-        if path == "/api/calendar/agenda":
-            self.handle_calendar_agenda(query)
-        elif path == "/api/health":
-            self.send_json_response({"status": "ok", "calendar_available": CALENDAR_AVAILABLE})
-        else:
-            # Fall back to static file serving
-            super().do_GET()
+        try:
+            # API Routes
+            if path == "/api/calendar/agenda":
+                self.handle_calendar_agenda(query)
+            elif path == "/api/health":
+                self.send_json_response({"status": "ok", "calendar_available": CALENDAR_AVAILABLE})
+            else:
+                # Fall back to static file serving
+                super().do_GET()
+        except (BrokenPipeError, ConnectionResetError):
+            # Client disconnected early, suppress error
+            pass
     
     def handle_calendar_agenda(self, query):
         """Handle GET /api/calendar/agenda endpoint."""
