@@ -71,7 +71,12 @@ def get_calendar_service():
             flow = InstalledAppFlow.from_client_secrets_file(
                 credentials_path, SCOPES
             )
-            creds = flow.run_local_server(port=0)
+            # Try to open browser, fallback to console if it fails (headless)
+            try:
+                creds = flow.run_local_server(port=0)
+            except Exception:
+                print("⚠️  Could not open browser. Please visit the following URL to authorize:")
+                creds = flow.run_local_server(port=0, open_browser=False)
         
         with open(token_path, "w") as token:
             token.write(creds.to_json())

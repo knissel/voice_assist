@@ -11,13 +11,13 @@ from tools.audio import route_to_bluetooth, set_audio_sink, get_audio_sinks, con
 from tools.youtube_music import play_youtube_music, stop_music
 from tools.timer import set_timer, cancel_timer, list_timers, check_timer
 from tools.recipes import pizza_dough_recipe
-try:
-    from tools.calendar import tool_get_agenda, tool_add_event
-except Exception as exc:
-    def tool_get_agenda(when: str = "today"):
-        return f"Calendar unavailable: {exc}"
-    def tool_add_event(title: str, start_iso: str, end_iso: str, description: str = "", location: str = ""):
-        return f"Calendar unavailable: {exc}"
+# try:
+#     from tools.calendar import tool_get_agenda, tool_add_event
+# except Exception as exc:
+#     def tool_get_agenda(when: str = "today"):
+#         return f"Calendar unavailable: {exc}"
+#     def tool_add_event(title: str, start_iso: str, end_iso: str, description: str = "", location: str = ""):
+#         return f"Calendar unavailable: {exc}"
 
 # Tool specifications in Gemini format
 GEMINI_TOOLS = [
@@ -174,56 +174,56 @@ GEMINI_TOOLS = [
                 )
             ),
             types.FunctionDeclaration(
-                name="pizza_dough_recipe",
-                description=(
-                    "Create or adjust a pizza dough recipe using baker's percentages. "
-                    "Use for Neapolitan dough requests or when user says to adjust hydration. "
-                    "If only a change is provided (e.g., hydration_percent), reuse the last recipe."
-                ),
-                parameters=types.Schema(
-                    type="OBJECT",
-                    properties={
-                        "style": types.Schema(type="STRING", description="Pizza style, e.g. 'neapolitan'"),
-                        "ball_weight_g": types.Schema(type="NUMBER", description="Target dough ball weight in grams"),
-                        "ball_count": types.Schema(type="INTEGER", description="Number of dough balls"),
-                        "hydration_percent": types.Schema(type="NUMBER", description="Hydration percentage (e.g., 62)"),
-                        "salt_percent": types.Schema(type="NUMBER", description="Salt percentage (e.g., 2.8)"),
-                        "yeast_percent": types.Schema(type="NUMBER", description="Instant yeast percentage (e.g., 0.1)"),
-                        "oil_percent": types.Schema(type="NUMBER", description="Oil percentage (0 for Neapolitan)"),
-                        "bake_temp_f": types.Schema(type="INTEGER", description="Bake temperature in Fahrenheit"),
-                        "cold_ferment_hours": types.Schema(type="NUMBER", description="Cold ferment duration in hours"),
-                        "room_temp_hours": types.Schema(type="NUMBER", description="Room temperature proof duration in hours"),
-                        "use_last": types.Schema(type="BOOLEAN", description="Use last recipe as base when fields are omitted")
-                    },
-                    required=[]
-                )
-            ),
-            types.FunctionDeclaration(
-                name="get_calendar_agenda",
-                description="Get the user's calendar agenda for today or this week. Returns a list of events with times and titles.",
-                parameters=types.Schema(
-                    type="OBJECT",
-                    properties={
-                        "when": types.Schema(type="STRING", description="Time period: 'today' or 'week'. Defaults to 'today'.")
-                    },
-                    required=[]
-                )
-            ),
-            types.FunctionDeclaration(
-                name="add_calendar_event",
-                description="Add a new event to the user's Google Calendar.",
-                parameters=types.Schema(
-                    type="OBJECT",
-                    properties={
-                        "title": types.Schema(type="STRING", description="Title/summary of the event"),
-                        "start_iso": types.Schema(type="STRING", description="Start time in ISO8601 format (e.g., 2026-01-15T14:00:00-05:00)"),
-                        "end_iso": types.Schema(type="STRING", description="End time in ISO8601 format"),
-                        "description": types.Schema(type="STRING", description="Optional description for the event"),
-                        "location": types.Schema(type="STRING", description="Optional location for the event")
-                    },
-                    required=["title", "start_iso", "end_iso"]
-                )
-            )
+            #     name="pizza_dough_recipe",
+            #     description=(
+            #         "Create or adjust a pizza dough recipe using baker's percentages. "
+            #         "Use for Neapolitan dough requests or when user says to adjust hydration. "
+            #         "If only a change is provided (e.g., hydration_percent), reuse the last recipe."
+            #     ),
+            #     parameters=types.Schema(
+            #         type="OBJECT",
+            #         properties={
+            #             "style": types.Schema(type="STRING", description="Pizza style, e.g. 'neapolitan'"),
+            #             "ball_weight_g": types.Schema(type="NUMBER", description="Target dough ball weight in grams"),
+            #             "ball_count": types.Schema(type="INTEGER", description="Number of dough balls"),
+            #             "hydration_percent": types.Schema(type="NUMBER", description="Hydration percentage (e.g., 62)"),
+            #             "salt_percent": types.Schema(type="NUMBER", description="Salt percentage (e.g., 2.8)"),
+            #             "yeast_percent": types.Schema(type="NUMBER", description="Instant yeast percentage (e.g., 0.1)"),
+            #             "oil_percent": types.Schema(type="NUMBER", description="Oil percentage (0 for Neapolitan)"),
+            #             "bake_temp_f": types.Schema(type="INTEGER", description="Bake temperature in Fahrenheit"),
+            #             "cold_ferment_hours": types.Schema(type="NUMBER", description="Cold ferment duration in hours"),
+            #             "room_temp_hours": types.Schema(type="NUMBER", description="Room temperature proof duration in hours"),
+            #             "use_last": types.Schema(type="BOOLEAN", description="Use last recipe as base when fields are omitted")
+            #         },
+            #         required=[]
+            #     )
+            # ),
+            # types.FunctionDeclaration(
+            #     name="get_calendar_agenda",
+            #     description="Get the user's calendar agenda for today or this week. Returns a list of events with times and titles.",
+            #     parameters=types.Schema(
+            #         type="OBJECT",
+            #         properties={
+            #             "when": types.Schema(type="STRING", description="Time period: 'today' or 'week'. Defaults to 'today'.")
+            #         },
+            #         required=[]
+            #     )
+            # ),
+            # types.FunctionDeclaration(
+            #     name="add_calendar_event",
+            #     description="Add a new event to the user's Google Calendar.",
+            #     parameters=types.Schema(
+            #         type="OBJECT",
+            #         properties={
+            #             "title": types.Schema(type="STRING", description="Title/summary of the event"),
+            #             "start_iso": types.Schema(type="STRING", description="Start time in ISO8601 format (e.g., 2026-01-15T14:00:00-05:00)"),
+            #             "end_iso": types.Schema(type="STRING", description="End time in ISO8601 format"),
+            #             "description": types.Schema(type="STRING", description="Optional description for the event"),
+            #             "location": types.Schema(type="STRING", description="Optional location for the event")
+            #         },
+            #         required=["title", "start_iso", "end_iso"]
+            #     )
+            # )
         ]
     )
 ]
@@ -523,8 +523,8 @@ TOOL_FUNCTIONS = {
     "check_timer": check_timer,
     "list_timers": list_timers,
     "pizza_dough_recipe": pizza_dough_recipe,
-    "get_calendar_agenda": tool_get_agenda,
-    "add_calendar_event": tool_add_event
+    # "get_calendar_agenda": tool_get_agenda,
+    # "add_calendar_event": tool_add_event
 }
 
 def dispatch_tool(name: str, args: dict) -> str:
