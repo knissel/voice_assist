@@ -168,8 +168,28 @@ class EdgeAssistant:
         self._suppress_wakeword_until = 0.0
         self._speaking = False
 
+
+        # Event Bus Subscriptions
+        self.bus.subscribe("state_changed", self._on_state_changed)
+        self.bus.subscribe("transcript_final", self._on_transcript)
+        self.bus.subscribe("assistant_text", self._on_assistant_text)
+        
+    def _on_state_changed(self, event):
+        new_state = event.data["to_state"]
+        self._set_status(new_state)
+
+    def _on_transcript(self, event):
+        update_dashboard_state("last_transcript", event.data["text"])
+
+    def _on_assistant_text(self, event):
+        update_dashboard_state("last_response", event.data["text"])
+
     def _set_status(self, status: str):
         update_dashboard_state("status", status)
+        # Map specific states to LED/Status behavior
+        if status == "thinking_local":
+            status = "processing" # Use processing color for local thinking
+
         if self._led_controller:
             self._led_controller.set_state(status)
         self._led_state = status
@@ -278,7 +298,8 @@ class EdgeAssistant:
 
     async def _process_locally(self, audio_data: bytes):
         """Process collected audio locally via Assistant class."""
-        self._set_status("processing")
+        # Status is now handled via events from Assistant
+        # self._set_status("processing") 
         
         # Save to temp WAV
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -300,10 +321,13 @@ class EdgeAssistant:
             
             if audio_bytes:
                 self._speaking = True
-                self._set_status("speaking")
+                # self._set_status("speaking") # Event bus handles this
                 await asyncio.to_thread(self.play_audio, audio_bytes)
                 self._speaking = False
                 self._suppress_wakeword(WAKEWORD_COOLDOWN_SECONDS)
+                
+                # Signal idle after speaking
+                emit_state_changed(self.bus, "speaking", "idle")
                 
         except Exception as e:
             print(f"[ERROR] Processing failed: {e}")
@@ -312,13 +336,13 @@ class EdgeAssistant:
             if os.path.exists(audio_path):
                 os.remove(audio_path)
             self.state = AudioRecorderState.LISTENING
-            self._set_status("listening")
+            # self._set_status("listening") # Do not force; let events or loop handle
             resume_media()
 
     async def run(self):
         print("[LISTEN] Edge Assistant (Unified) Listening...")
         self.assistant.bus = self.bus # Ensure bus is linked
-        self._set_status("listening")
+        emit_state_changed(self.bus, "initializing", "listening")
         
         pre_roll_buffer = collections.deque(maxlen=20) # ~1.5s
         recording_frames = []

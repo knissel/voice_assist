@@ -8,7 +8,8 @@ import wave
 import contextlib
 import tempfile
 import threading
-from typing import Optional, Tuple, Any
+import requests
+from typing import Optional, Tuple, Any, Dict
 
 from google import genai
 from google.genai import types
@@ -22,6 +23,11 @@ from core.tts_preprocessing import preprocess_for_tts
 from tools.transcription import create_transcription_service
 from tools.registry import GEMINI_TOOLS, dispatch_tool
 from adapters.gpu_tts_client import GPUTTSClient
+
+try:
+    from piper.voice import PiperVoice
+except ImportError:
+    PiperVoice = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -57,18 +63,41 @@ class Assistant:
         self.clear_phrases = parse_clear_phrases(os.getenv("CONVERSATION_CLEAR_PHRASES"))
         self.reset_on_tool = os.getenv("CONVERSATION_RESET_ON_TOOL_CALL", "true").lower() == "true"
         
-        # 4. TTS (GPU with fallback)
+
+        # 4. TTS Configuration
+        # Options: "gpu" (XTTS/VoxCPM via 5090), "local" (Piper)
+        self.tts_provider = os.getenv("TTS_PROVIDER", "gpu").lower()
+        
+        # GPU TTS
         self.xtts_url = os.getenv("XTTS_SERVER_URL", "http://localhost:5001")
         self.gpu_tts = None
-        if os.getenv("USE_GPU_TTS", "true").lower() == "true":
-            # Pass piper_voice=None as we might not load local piper in this class
-            # The main.py might handle simplified playback, or we handle it here.
-            # We'll use GPUTTSClient for synthesis.
+        if self.tts_provider == "gpu":
             self.gpu_tts = GPUTTSClient(
                 server_url=self.xtts_url,
                 piper_voice=None,
                 piper_sample_rate=22050
             )
+
+        # Local TTS (Piper)
+        self.piper_voice = None
+        if self.tts_provider == "local":
+            if PiperVoice:
+                model_path = os.getenv("PIPER_MODEL_PATH")
+                config_path = f"{model_path}.json" if model_path else None
+                if model_path and os.path.exists(model_path):
+                    try:
+                        self.piper_voice = PiperVoice.load(model_path, config_path=config_path)
+                        logger.info(f"Loaded Piper model: {model_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to load Piper model: {e}")
+                else:
+                    logger.warning("PIPER_MODEL_PATH not set or invalid. Local TTS will fail.")
+            else:
+                 logger.warning("piper-tts not installed or load failed.")
+
+        # 5. Local LLM Configuration (for Hybrid Routing)
+        self.local_llm_url = os.getenv("LOCAL_LLM_URL", "http://localhost:8080/v1")
+        self.use_local_llm = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
 
     def process_voice_command(self, audio_path: str) -> Tuple[str, Optional[bytes], int]:
         """
@@ -87,16 +116,39 @@ class Assistant:
             
         emit_transcript(self.bus, transcript, is_final=True)
         
-        # 2. Think (LLM & Tools)
+        # 2. Think (Hybrid Routing)
         emit_state_changed(self.bus, "transcribing", "thinking")
-        response_text = self._process_llm(transcript)
+        
+        # Decide: Local vs Cloud
+        use_local = self._should_use_local_llm(transcript)
+        response_text = ""
+        
+        if use_local and self.use_local_llm:
+            try:
+                response_text = self._process_local_llm(transcript)
+                # Fallback to cloud if local fails or returns empty?
+                if not response_text:
+                     logger.warning("Local LLM returned empty, falling back to Gemini.")
+                     response_text = self._process_gemini(transcript)
+            except Exception as e:
+                logger.error(f"Local LLM failed: {e}. Falling back to Gemini.")
+                # Fallback
+                response_text = self._process_gemini(transcript)
+        else:
+            # Default to Cloud (Gemini)
+            response_text = self._process_gemini(transcript)
         
         # 3. Speak (TTS)
         audio_bytes = None
         if response_text:
             emit_assistant_text(self.bus, response_text)
             emit_state_changed(self.bus, "thinking", "speaking")
-            audio_bytes = self._synthesize_tts(response_text)
+            
+            # Select TTS Strategy
+            if self.tts_provider == "local" and self.piper_voice:
+                audio_bytes = self._synthesize_local_tts(response_text)
+            else:
+                audio_bytes = self._synthesize_gpu_tts(response_text)
             # Note: The caller (main.py) is responsible for playing the audio
             # and setting state back to 'idle' after playback.
         else:
@@ -105,8 +157,66 @@ class Assistant:
         latency_ms = int((time.time() - start_time) * 1000)
         return response_text, audio_bytes, latency_ms
 
-    def _process_llm(self, user_text: str) -> str:
-        """Run the LLM, execute tools, and return final response text."""
+        else:
+             emit_state_changed(self.bus, "thinking", "idle")
+
+        latency_ms = int((time.time() - start_time) * 1000)
+        return response_text, audio_bytes, latency_ms
+
+    def _should_use_local_llm(self, text: str) -> bool:
+        """Heuristic to decide if we can handle this locally."""
+        if not self.use_local_llm:
+            return False
+            
+        text = text.lower()
+        
+        # Simple keywords suitable for a small model
+        local_intents = [
+            'turn on', 'turn off', 'light', 'fan', 'switch', # Home control
+            'time', 'date', 'timer', 'alarm',               # Time
+            'repeat', 'say again',                          # Meta
+            'who are you', 'what is your name'              # Identity
+        ]
+        
+        # Check if it matches any local intent
+        is_simple = any(x in text for x in local_intents)
+        
+        # If it looks like a complex query, force cloud
+        complex_triggers = ['explain', 'why', 'how', 'search', 'news', 'weather', 'stock', 'code', 'write']
+        if any(x in text for x in complex_triggers):
+            return False
+            
+        return is_simple
+
+    def _process_local_llm(self, user_text: str) -> str:
+        """Call a local OpenAI-compatible endpoint (e.g. llama-server)."""
+        logger.info(f"🧠 Routing to Local LLM: {user_text}")
+        emit_state_changed(self.bus, "thinking", "thinking_local")
+        
+        try:
+            # Assuming standard OpenAI format
+            payload = {
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant. Keep answers very short and concise."},
+                    {"role": "user", "content": user_text}
+                ],
+                "temperature": 0.3,
+                "max_tokens": 150
+            }
+            res = requests.post(f"{self.local_llm_url}/chat/completions", json=payload, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                content = data['choices'][0]['message']['content']
+                return content.strip()
+            else:
+                logger.error(f"Local LLM Error {res.status_code}: {res.text}")
+                return ""
+        except Exception as e:
+            logger.error(f"Local LLM Request Failed: {e}")
+            raise e
+
+    def _process_gemini(self, user_text: str) -> str:
+        """Run the Cloud LLM (Gemini), execute tools, and return final response text."""
         try:
             # Memory Management
             if self.memory:
@@ -203,7 +313,26 @@ class Assistant:
         contents.append(types.Content(role="user", parts=[types.Part(text=text)]))
         return contents
 
-    def _synthesize_tts(self, text: str) -> Optional[bytes]:
+    def _synthesize_local_tts(self, text: str) -> Optional[bytes]:
+        """Synthesize using local Piper model."""
+        if not text or not self.piper_voice:
+            return None
+        
+        try:
+            start = time.time()
+            buf = io.BytesIO()
+            with wave.open(buf, 'wb') as wav_file:
+                # Piper writes directly to WAV file object
+                self.piper_voice.synthesize(text, wav_file)
+            
+            dur = (time.time() - start) * 1000
+            logger.info(f"🔊 Local Piper TTS: {dur:.0f}ms")
+            return buf.getvalue()
+        except Exception as e:
+            logger.error(f"Local TTS Error: {e}")
+            return None
+
+    def _synthesize_gpu_tts(self, text: str) -> Optional[bytes]:
         """Convert text to WAV bytes using GPU TTS."""
         if not text or not self.gpu_tts:
             return None
