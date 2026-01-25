@@ -115,6 +115,7 @@ class Assistant:
             return "", None, int((time.time() - start_time) * 1000)
             
         emit_transcript(self.bus, transcript, is_final=True)
+        logger.info(f"📝 STT transcript: {transcript}")
         
         # 2. Think (Hybrid Routing)
         emit_state_changed(self.bus, "transcribing", "thinking")
@@ -143,6 +144,7 @@ class Assistant:
         if response_text:
             emit_assistant_text(self.bus, response_text)
             emit_state_changed(self.bus, "thinking", "speaking")
+            logger.info(f"🗣️ TTS response: {response_text}")
             
             # Select TTS Strategy
             if self.tts_provider == "local" and self.piper_voice:
@@ -152,13 +154,7 @@ class Assistant:
             # Note: The caller (main.py) is responsible for playing the audio
             # and setting state back to 'idle' after playback.
         else:
-             emit_state_changed(self.bus, "thinking", "idle")
-
-        latency_ms = int((time.time() - start_time) * 1000)
-        return response_text, audio_bytes, latency_ms
-
-        else:
-             emit_state_changed(self.bus, "thinking", "idle")
+            emit_state_changed(self.bus, "thinking", "idle")
 
         latency_ms = int((time.time() - start_time) * 1000)
         return response_text, audio_bytes, latency_ms

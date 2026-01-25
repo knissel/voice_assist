@@ -8,6 +8,7 @@ import json
 import pyaudio
 import wave
 import subprocess
+import inspect
 import os
 import shutil
 import threading
@@ -57,6 +58,7 @@ VAD_SILENCE_SECONDS = float(os.getenv("VAD_SILENCE_SECONDS", "0.8"))
 VAD_GRACE_SECONDS = float(os.getenv("VAD_GRACE_SECONDS", "0.8"))
 VAD_MAX_RECORD_SECONDS = float(os.getenv("VAD_MAX_RECORD_SECONDS", "12.0"))
 VAD_MIN_RECORD_SECONDS = float(os.getenv("VAD_MIN_RECORD_SECONDS", "1.0")) # Minimum relevant audio
+VAD_SPEECH_THRESHOLD = float(os.getenv("VAD_SPEECH_THRESHOLD", "0.5"))
 
 # === UTILS ===
 def _resolve_wakeword_models(models: list[str], repo_root: str) -> list[str]:
@@ -262,7 +264,16 @@ class EdgeAssistant:
             raise RuntimeError("openwakeword not installed")
         _ensure_openwakeword_models()
         resolved = _resolve_wakeword_models(WAKEWORD_MODELS, self.repo_root)
-        self.wakeword_detector = OpenWakeWordModel(wakeword_models=resolved, inference_framework="onnx")
+        init_sig = inspect.signature(OpenWakeWordModel.__init__)
+        params = init_sig.parameters
+        init_kwargs = {}
+        if "wakeword_model_paths" in params:
+            init_kwargs["wakeword_model_paths"] = resolved
+        elif "wakeword_models" in params:
+            init_kwargs["wakeword_models"] = resolved
+        if "inference_framework" in params:
+            init_kwargs["inference_framework"] = "onnx"
+        self.wakeword_detector = OpenWakeWordModel(**init_kwargs)
 
     def _setup_vad(self):
         vad_path = os.path.join(self.repo_root, "models", "silero_vad.jit")
@@ -348,13 +359,25 @@ class EdgeAssistant:
         recording_frames = []
         silence_counter = 0
         recording_max_frames = int(VAD_MAX_RECORD_SECONDS * WAKEWORD_SAMPLE_RATE / WAKEWORD_FRAME_LENGTH)
-        silence_limit = int(VAD_SILENCE_SECONDS * WAKEWORD_SAMPLE_RATE / WAKEWORD_FRAME_LENGTH)
+        silence_limit = max(1, int(VAD_SILENCE_SECONDS * WAKEWORD_SAMPLE_RATE / WAKEWORD_FRAME_LENGTH))
+        min_record_frames = max(1, int(VAD_MIN_RECORD_SECONDS * WAKEWORD_SAMPLE_RATE / WAKEWORD_FRAME_LENGTH))
+        grace_frames = max(0, int(VAD_GRACE_SECONDS * WAKEWORD_SAMPLE_RATE / WAKEWORD_FRAME_LENGTH))
         
         # VAD helper
         def is_speech(pcm):
             # Normalize to -1..1
             float_pcm = torch.from_numpy(pcm.astype(np.float32) / 32768.0)
-            return self.vad_model(float_pcm, WAKEWORD_SAMPLE_RATE).item() > 0.5
+            required = 512 if WAKEWORD_SAMPLE_RATE == 16000 else 256
+            if float_pcm.numel() < required:
+                return False
+            max_score = 0.0
+            for start in range(0, float_pcm.numel() - required + 1, required):
+                score = self.vad_model(float_pcm[start:start + required], WAKEWORD_SAMPLE_RATE).item()
+                if score > max_score:
+                    max_score = score
+                if max_score > VAD_SPEECH_THRESHOLD:
+                    return True
+            return False
 
         while True:
             # Non-blocking audio read?
@@ -399,14 +422,17 @@ class EdgeAssistant:
 
             elif self.state == AudioRecorderState.RECORDING:
                 recording_frames.append(pcm_bytes)
-                
-                if is_speech(pcm):
+
+                frames_since_start = len(recording_frames)
+                if frames_since_start <= grace_frames:
+                    silence_counter = 0
+                elif is_speech(pcm):
                     silence_counter = 0
                 else:
                     silence_counter += 1
                 
                 # Check end conditions
-                is_silence_timeout = silence_counter > silence_limit
+                is_silence_timeout = silence_counter > silence_limit and frames_since_start > min_record_frames
                 is_max_len = len(recording_frames) > recording_max_frames
                 
                 if is_silence_timeout or is_max_len:
