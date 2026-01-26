@@ -55,6 +55,9 @@ WAKEWORD_SAMPLE_RATE = 16000
 WAKEWORD_FRAME_LENGTH = 1280
 WAKEWORD_VAD_GATE = os.getenv("WAKEWORD_VAD_GATE", "true").strip().lower() in {"1", "true", "yes", "on"}
 WAKEWORD_DEBOUNCE_FRAMES = max(1, int(os.getenv("WAKEWORD_DEBOUNCE_FRAMES", "2")))
+WAKEWORD_BUFFER_FRAMES = max(3, int(os.getenv("WAKEWORD_BUFFER_FRAMES", "5")))
+WAKEWORD_FEED_FRAMES = max(1, int(os.getenv("WAKEWORD_FEED_FRAMES", "3")))
+WAKEWORD_POST_DETECT_TIMEOUT = float(os.getenv("WAKEWORD_POST_DETECT_TIMEOUT", "2.0"))
 DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "5000"))
 VAD_SILENCE_SECONDS = float(os.getenv("VAD_SILENCE_SECONDS", "0.8"))
 VAD_GRACE_SECONDS = float(os.getenv("VAD_GRACE_SECONDS", "0.8"))
@@ -169,11 +172,12 @@ class EdgeAssistant:
         # Wakeword state
         self._wakeword_debug = os.getenv("WAKEWORD_DEBUG", "false").strip().lower() in {"1", "true", "yes", "on"}
         self._wakeword_debug_last = 0.0
-        buffer_frames = 5
-        self._wakeword_audio_buffer: collections.deque[np.ndarray] = collections.deque(maxlen=buffer_frames)
+        self._wakeword_audio_buffer: collections.deque[np.ndarray] = collections.deque(maxlen=WAKEWORD_BUFFER_FRAMES)
         self._wakeword_hits: collections.deque[int] = collections.deque(maxlen=WAKEWORD_DEBOUNCE_FRAMES)
         self._suppress_wakeword_until = 0.0
         self._speaking = False
+        self._post_detect_deadline = 0.0
+        self._speech_seen = False
 
 
         # Event Bus Subscriptions
@@ -315,6 +319,20 @@ class EdgeAssistant:
             self.out_stream.write(audio_np)
         os.remove(tmp_path)
 
+    def _stream_audio_chunk(self, audio_int16: np.ndarray, src_rate: int) -> None:
+        if not self.out_stream or audio_int16 is None or audio_int16.size == 0:
+            return
+        audio_np = audio_int16
+        if src_rate != self.sample_rate:
+            from scipy.signal import resample_poly
+            from math import gcd
+            g = gcd(src_rate, self.sample_rate)
+            audio_np = resample_poly(audio_np.astype(np.float32), self.sample_rate // g, src_rate // g)
+            audio_np = np.clip(audio_np, -32768, 32767).astype(np.int16)
+        duration_sec = len(audio_np) / float(self.sample_rate or 1)
+        self._suppress_wakeword(duration_sec + WAKEWORD_COOLDOWN_SECONDS)
+        self.out_stream.write(audio_np)
+
     async def _process_locally(self, audio_data: bytes):
         """Process collected audio locally via Assistant class."""
         # Status is now handled via events from Assistant
@@ -330,9 +348,21 @@ class EdgeAssistant:
             audio_path = tmp.name
 
         try:
-             # Run sync assistant logic in thread
+            def on_stream_start():
+                self._speaking = True
+
+            def on_stream_end():
+                self._speaking = False
+                self._suppress_wakeword(WAKEWORD_COOLDOWN_SECONDS)
+                emit_state_changed(self.bus, "speaking", "idle")
+
+            # Run sync assistant logic in thread
             text, audio_bytes, lat = await asyncio.to_thread(
-                self.assistant.process_voice_command, audio_path
+                self.assistant.process_voice_command,
+                audio_path,
+                self._stream_audio_chunk,
+                on_stream_start,
+                on_stream_end
             )
             
             update_dashboard_state("last_response", text)
@@ -427,8 +457,9 @@ class EdgeAssistant:
                 
                 # Predict
                 feed = pcm
-                if len(self._wakeword_audio_buffer) >= 3:
-                     feed = np.concatenate(list(self._wakeword_audio_buffer)[-3:])
+                feed_frames = min(WAKEWORD_FEED_FRAMES, WAKEWORD_BUFFER_FRAMES)
+                if len(self._wakeword_audio_buffer) >= feed_frames:
+                     feed = np.concatenate(list(self._wakeword_audio_buffer)[-feed_frames:])
                 
                 scores = self.wakeword_detector.predict(feed)
                 found = scores and max(scores.values()) >= WAKEWORD_THRESHOLD
@@ -444,6 +475,8 @@ class EdgeAssistant:
                     pause_media()
                     self.state = AudioRecorderState.RECORDING
                     self._set_status("recording")
+                    self._speech_seen = False
+                    self._post_detect_deadline = time.time() + WAKEWORD_POST_DETECT_TIMEOUT
                     # Prepend pre-roll
                     recording_frames = list(pre_roll_buffer)
                     silence_counter = 0
@@ -455,7 +488,14 @@ class EdgeAssistant:
                 if frames_since_start <= grace_frames:
                     silence_counter = 0
                 elif is_speech(pcm):
+                    self._speech_seen = True
                     silence_counter = 0
+                elif not self._speech_seen:
+                    if self._post_detect_deadline and time.time() > self._post_detect_deadline:
+                        print("[WAKE] No speech after wakeword, returning to listening.")
+                        self.state = AudioRecorderState.LISTENING
+                        emit_state_changed(self.bus, "recording", "listening")
+                        continue
                 else:
                     silence_counter += 1
                 

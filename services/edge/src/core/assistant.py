@@ -11,7 +11,7 @@ import threading
 import requests
 import numpy as np
 import re
-from typing import Optional, Tuple, Any, Dict
+from typing import Optional, Tuple, Any, Dict, Callable
 
 from google import genai
 from google.genai import types
@@ -108,6 +108,7 @@ class Assistant:
         # Local TTS (Pocket TTS)
         self.pocket_tts_model = None
         self.pocket_tts_voice_state = None
+        self.pocket_streaming = os.getenv("POCKET_TTS_STREAMING", "true").lower() == "true"
         if self.tts_provider == "pocket":
             if TTSModel:
                 try:
@@ -145,7 +146,13 @@ class Assistant:
         self.local_llm_url = os.getenv("LOCAL_LLM_URL", "http://localhost:8080/v1")
         self.use_local_llm = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
 
-    def process_voice_command(self, audio_path: str) -> Tuple[str, Optional[bytes], int]:
+    def process_voice_command(
+        self,
+        audio_path: str,
+        stream_callback: Optional[Callable[[np.ndarray, int], None]] = None,
+        on_tts_start: Optional[Callable[[], None]] = None,
+        on_tts_end: Optional[Callable[[], None]] = None
+    ) -> Tuple[str, Optional[bytes], int]:
         """
         Full pipeline: Audio File -> Transcript -> LLM/Tools -> TTS Audio.
         Returns: (response_text, audio_wav_bytes, latency_ms)
@@ -197,7 +204,17 @@ class Assistant:
             if self.tts_provider == "local" and self.piper_voice:
                 audio_bytes = self._synthesize_local_tts(response_text)
             elif self.tts_provider == "pocket" and self.pocket_tts_model:
-                audio_bytes = self._synthesize_pocket_tts(response_text)
+                if self.pocket_streaming and stream_callback:
+                    streamed = self._stream_pocket_tts(
+                        response_text,
+                        stream_callback,
+                        on_tts_start=on_tts_start,
+                        on_tts_end=on_tts_end
+                    )
+                    if not streamed:
+                        audio_bytes = self._synthesize_pocket_tts(response_text)
+                else:
+                    audio_bytes = self._synthesize_pocket_tts(response_text)
             else:
                 audio_bytes = self._synthesize_gpu_tts(response_text)
             # Note: The caller (main.py) is responsible for playing the audio
@@ -439,3 +456,35 @@ class Assistant:
         except Exception as e:
             logger.error(f"Pocket TTS Error: {e}")
             return None
+
+    def _stream_pocket_tts(
+        self,
+        text: str,
+        stream_callback: Callable[[np.ndarray, int], None],
+        on_tts_start: Optional[Callable[[], None]] = None,
+        on_tts_end: Optional[Callable[[], None]] = None
+    ) -> bool:
+        """Stream Pocket TTS audio chunks to a callback."""
+        if not text or not self.pocket_tts_model or not self.pocket_tts_voice_state:
+            return False
+
+        try:
+            if on_tts_start:
+                on_tts_start()
+            clean = preprocess_for_tts(text)
+            for chunk in self.pocket_tts_model.generate_audio_stream(self.pocket_tts_voice_state, clean):
+                if chunk is None:
+                    continue
+                chunk_np = chunk.detach().cpu().numpy().squeeze()
+                if chunk_np.size == 0:
+                    continue
+                chunk_np = np.clip(chunk_np, -1.0, 1.0)
+                chunk_int16 = (chunk_np * 32767.0).astype(np.int16)
+                stream_callback(chunk_int16, self.pocket_tts_model.sample_rate)
+            return True
+        except Exception as e:
+            logger.error(f"Pocket TTS Stream Error: {e}")
+            return False
+        finally:
+            if on_tts_end:
+                on_tts_end()
