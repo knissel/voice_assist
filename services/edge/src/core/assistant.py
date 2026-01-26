@@ -9,6 +9,8 @@ import contextlib
 import tempfile
 import threading
 import requests
+import numpy as np
+import re
 from typing import Optional, Tuple, Any, Dict
 
 from google import genai
@@ -28,6 +30,10 @@ try:
     from piper.voice import PiperVoice
 except ImportError:
     PiperVoice = None
+try:
+    from pocket_tts import TTSModel
+except ImportError:
+    TTSModel = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -62,10 +68,14 @@ class Assistant:
         
         self.clear_phrases = parse_clear_phrases(os.getenv("CONVERSATION_CLEAR_PHRASES"))
         self.reset_on_tool = os.getenv("CONVERSATION_RESET_ON_TOOL_CALL", "true").lower() == "true"
+
+        # Wakeword phrases to strip from transcript before LLM
+        wakeword_raw = os.getenv("WAKEWORD_PHRASES", "oogway")
+        self.wakeword_phrases = [p.strip().lower() for p in wakeword_raw.split(",") if p.strip()]
         
 
         # 4. TTS Configuration
-        # Options: "gpu" (XTTS/VoxCPM via 5090), "local" (Piper)
+        # Options: "gpu" (XTTS/VoxCPM via 5090), "local" (Piper), "pocket" (Pocket TTS)
         self.tts_provider = os.getenv("TTS_PROVIDER", "gpu").lower()
         
         # GPU TTS
@@ -95,6 +105,42 @@ class Assistant:
             else:
                  logger.warning("piper-tts not installed or load failed.")
 
+        # Local TTS (Pocket TTS)
+        self.pocket_tts_model = None
+        self.pocket_tts_voice_state = None
+        if self.tts_provider == "pocket":
+            if TTSModel:
+                try:
+                    variant = os.getenv("POCKET_TTS_VARIANT", "b6369a24")
+                    temperature = float(os.getenv("POCKET_TTS_TEMPERATURE", "0.7"))
+                    lsd_decode_steps = int(os.getenv("POCKET_TTS_LSD_DECODE_STEPS", "1"))
+                    eos_threshold = float(os.getenv("POCKET_TTS_EOS_THRESHOLD", "-4.0"))
+                    noise_clamp_raw = os.getenv("POCKET_TTS_NOISE_CLAMP", "").strip().lower()
+                    noise_clamp = None if noise_clamp_raw in {"", "none", "null"} else float(noise_clamp_raw)
+                    voice_prompt = os.getenv(
+                        "POCKET_TTS_VOICE",
+                        "alba"
+                    )
+                    self.pocket_tts_model = TTSModel.load_model(
+                        variant=variant,
+                        temp=temperature,
+                        lsd_decode_steps=lsd_decode_steps,
+                        noise_clamp=noise_clamp,
+                        eos_threshold=eos_threshold
+                    )
+                    self.pocket_tts_voice_state = self.pocket_tts_model.get_state_for_audio_prompt(
+                        voice_prompt
+                    )
+                    logger.info(
+                        "Loaded Pocket TTS model (variant=%s, voice=%s)",
+                        variant,
+                        voice_prompt
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to load Pocket TTS model: {e}")
+            else:
+                logger.warning("pocket-tts not installed or load failed.")
+
         # 5. Local LLM Configuration (for Hybrid Routing)
         self.local_llm_url = os.getenv("LOCAL_LLM_URL", "http://localhost:8080/v1")
         self.use_local_llm = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
@@ -109,6 +155,7 @@ class Assistant:
         # 1. Transcribe
         emit_state_changed(self.bus, "listening", "transcribing")
         transcript = self.transcription.transcribe(audio_path)
+        transcript = self._strip_wakeword_phrase(transcript)
         
         if not transcript:
             emit_state_changed(self.bus, "transcribing", "idle")
@@ -149,6 +196,8 @@ class Assistant:
             # Select TTS Strategy
             if self.tts_provider == "local" and self.piper_voice:
                 audio_bytes = self._synthesize_local_tts(response_text)
+            elif self.tts_provider == "pocket" and self.pocket_tts_model:
+                audio_bytes = self._synthesize_pocket_tts(response_text)
             else:
                 audio_bytes = self._synthesize_gpu_tts(response_text)
             # Note: The caller (main.py) is responsible for playing the audio
@@ -183,6 +232,17 @@ class Assistant:
             return False
             
         return is_simple
+
+    def _strip_wakeword_phrase(self, text: str) -> str:
+        if not text:
+            return text
+        stripped = text.strip()
+        for phrase in self.wakeword_phrases:
+            pattern = rf"^{re.escape(phrase)}[\\s,;:!?.-]*"
+            updated = re.sub(pattern, "", stripped, flags=re.IGNORECASE)
+            if updated != stripped:
+                return updated.strip()
+        return stripped
 
     def _process_local_llm(self, user_text: str) -> str:
         """Call a local OpenAI-compatible endpoint (e.g. llama-server)."""
@@ -352,3 +412,30 @@ class Assistant:
             logger.error(f"TTS Error: {e}")
             
         return None
+
+    def _synthesize_pocket_tts(self, text: str) -> Optional[bytes]:
+        """Synthesize using local Pocket TTS model."""
+        if not text or not self.pocket_tts_model or not self.pocket_tts_voice_state:
+            return None
+
+        try:
+            start = time.time()
+            clean = preprocess_for_tts(text)
+            audio = self.pocket_tts_model.generate_audio(self.pocket_tts_voice_state, clean)
+            audio_np = audio.detach().cpu().numpy().squeeze()
+            audio_np = np.clip(audio_np, -1.0, 1.0)
+            audio_int16 = (audio_np * 32767.0).astype(np.int16)
+
+            buf = io.BytesIO()
+            with wave.open(buf, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(self.pocket_tts_model.sample_rate)
+                wf.writeframes(audio_int16.tobytes())
+
+            dur = (time.time() - start) * 1000
+            logger.info(f"🔊 Pocket TTS: {dur:.0f}ms")
+            return buf.getvalue()
+        except Exception as e:
+            logger.error(f"Pocket TTS Error: {e}")
+            return None
