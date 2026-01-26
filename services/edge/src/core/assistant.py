@@ -142,7 +142,19 @@ class Assistant:
             else:
                 logger.warning("pocket-tts not installed or load failed.")
 
-        # 5. Local LLM Configuration (for Hybrid Routing)
+        # 5. TTS Response Cache (pre-baked phrases)
+        self.tts_cache_enabled = os.getenv("TTS_CACHE_ENABLED", "true").lower() == "true"
+        self.tts_prebaked_phrases = self._parse_prebaked_phrases(
+            os.getenv("TTS_PREBAKED_PHRASES", "done,ok,okay")
+        )
+        self.tts_prebake_on_start = os.getenv("TTS_PREBAKE_ON_START", "false").lower() == "true"
+        self._tts_cache: Dict[str, bytes] = {}
+        self._tts_cache_lock = threading.Lock()
+        self._tts_prebaked_keys = {self._tts_cache_key(p) for p in self.tts_prebaked_phrases}
+        if self.tts_cache_enabled and self.tts_prebake_on_start and self._tts_prebaked_keys:
+            threading.Thread(target=self._warm_tts_cache, daemon=True).start()
+
+        # 6. Local LLM Configuration (for Hybrid Routing)
         self.local_llm_url = os.getenv("LOCAL_LLM_URL", "http://localhost:8080/v1")
         self.use_local_llm = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
 
@@ -199,24 +211,23 @@ class Assistant:
             emit_assistant_text(self.bus, response_text)
             emit_state_changed(self.bus, "thinking", "speaking")
             logger.info(f"🗣️ TTS response: {response_text}")
-            
-            # Select TTS Strategy
-            if self.tts_provider == "local" and self.piper_voice:
-                audio_bytes = self._synthesize_local_tts(response_text)
-            elif self.tts_provider == "pocket" and self.pocket_tts_model:
-                if self.pocket_streaming and stream_callback:
-                    streamed = self._stream_pocket_tts(
-                        response_text,
-                        stream_callback,
-                        on_tts_start=on_tts_start,
-                        on_tts_end=on_tts_end
-                    )
-                    if not streamed:
-                        audio_bytes = self._synthesize_pocket_tts(response_text)
-                else:
-                    audio_bytes = self._synthesize_pocket_tts(response_text)
-            else:
-                audio_bytes = self._synthesize_gpu_tts(response_text)
+
+            # Select TTS Strategy (use cache for pre-baked phrases)
+            is_prebaked = self._is_prebaked_phrase(response_text)
+            if is_prebaked:
+                audio_bytes = self._get_cached_tts(response_text)
+
+            if audio_bytes is None:
+                allow_streaming = not is_prebaked
+                audio_bytes = self._synthesize_tts_bytes(
+                    response_text,
+                    stream_callback=stream_callback,
+                    on_tts_start=on_tts_start,
+                    on_tts_end=on_tts_end,
+                    allow_streaming=allow_streaming
+                )
+                if is_prebaked and audio_bytes:
+                    self._store_cached_tts(response_text, audio_bytes)
             # Note: The caller (main.py) is responsible for playing the audio
             # and setting state back to 'idle' after playback.
         else:
@@ -385,6 +396,76 @@ class Assistant:
             ))
         contents.append(types.Content(role="user", parts=[types.Part(text=text)]))
         return contents
+
+    def _parse_prebaked_phrases(self, raw: Optional[str]) -> list:
+        if not raw:
+            return []
+        return [p.strip() for p in raw.split(",") if p.strip()]
+
+    def _normalize_tts_text(self, text: str) -> str:
+        if not text:
+            return ""
+        cleaned = text
+        if self.tts_provider in {"gpu", "pocket"}:
+            cleaned = preprocess_for_tts(text)
+        return " ".join(cleaned.strip().lower().split())
+
+    def _tts_cache_key(self, text: str) -> str:
+        normalized = self._normalize_tts_text(text)
+        return f"{self.tts_provider}:{normalized}"
+
+    def _is_prebaked_phrase(self, text: str) -> bool:
+        if not self.tts_cache_enabled or not self._tts_prebaked_keys:
+            return False
+        return self._tts_cache_key(text) in self._tts_prebaked_keys
+
+    def _get_cached_tts(self, text: str) -> Optional[bytes]:
+        if not self.tts_cache_enabled:
+            return None
+        key = self._tts_cache_key(text)
+        with self._tts_cache_lock:
+            return self._tts_cache.get(key)
+
+    def _store_cached_tts(self, text: str, audio_bytes: Optional[bytes]) -> None:
+        if not self.tts_cache_enabled or not audio_bytes:
+            return
+        key = self._tts_cache_key(text)
+        with self._tts_cache_lock:
+            if key not in self._tts_cache:
+                self._tts_cache[key] = audio_bytes
+
+    def _warm_tts_cache(self) -> None:
+        for phrase in self.tts_prebaked_phrases:
+            if not phrase:
+                continue
+            if self._get_cached_tts(phrase):
+                continue
+            audio_bytes = self._synthesize_tts_bytes(phrase, allow_streaming=False)
+            if audio_bytes:
+                self._store_cached_tts(phrase, audio_bytes)
+
+    def _synthesize_tts_bytes(
+        self,
+        text: str,
+        stream_callback: Optional[Callable[[np.ndarray, int], None]] = None,
+        on_tts_start: Optional[Callable[[], None]] = None,
+        on_tts_end: Optional[Callable[[], None]] = None,
+        allow_streaming: bool = True
+    ) -> Optional[bytes]:
+        if self.tts_provider == "local" and self.piper_voice:
+            return self._synthesize_local_tts(text)
+        if self.tts_provider == "pocket" and self.pocket_tts_model:
+            if allow_streaming and self.pocket_streaming and stream_callback:
+                streamed = self._stream_pocket_tts(
+                    text,
+                    stream_callback,
+                    on_tts_start=on_tts_start,
+                    on_tts_end=on_tts_end
+                )
+                if streamed:
+                    return None
+            return self._synthesize_pocket_tts(text)
+        return self._synthesize_gpu_tts(text)
 
     def _synthesize_local_tts(self, text: str) -> Optional[bytes]:
         """Synthesize using local Piper model."""
