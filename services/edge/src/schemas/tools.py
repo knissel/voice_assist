@@ -38,7 +38,7 @@ class LightDevice(BaseModel):
 class LightingInput(BaseModel):
     """Input for control_home_lighting tool."""
     device_id: int = Field(description="Device ID (999 for all lights)")
-    brightness: int = Field(ge=0, le=100, description="Brightness 0-100")
+    brightness: int = Field(ge=0, le=100, description="Brightness 0-100 (for all lights: 0 off, 100 on, other values dim)")
 
 
 class LightingOutput(ToolOutput):

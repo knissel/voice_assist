@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 import time
 import os
@@ -49,6 +50,38 @@ class Control4Manager:
         light = C4Light(self.director, device_id)
         await light.setLevel(level)
         return f"Successfully set light {device_id} to {level}%"
+
+    async def _get_all_light_ids(self):
+        await self.ensure_connected()
+        devices_raw = await self.director.getAllItemInfo()
+        devices = json.loads(devices_raw)
+        light_ids = []
+        for device in devices:
+            device_type = device.get("type", 0)
+            control = (device.get("control") or "").lower()
+            if (device_type == 4 or "light" in control or "dimmer" in control) and "agent" not in control:
+                light_ids.append(device.get("id", 0))
+        return [light_id for light_id in light_ids if light_id]
+
+    async def set_all_lights(self, level):
+        light_ids = await self._get_all_light_ids()
+        if not light_ids:
+            return "No lights found to set."
+        successes = 0
+        failures = []
+        for light_id in light_ids:
+            try:
+                light = C4Light(self.director, light_id)
+                await light.setLevel(level)
+                successes += 1
+            except Exception as exc:
+                failures.append(f"{light_id}: {exc}")
+        message = f"Set {successes}/{len(light_ids)} lights to {level}%"
+        if failures:
+            preview = ", ".join(failures[:3])
+            suffix = "..." if len(failures) > 3 else ""
+            message = f"{message} (failed: {preview}{suffix})"
+        return message
     
     async def activate_scene(self, scene_id):
         await self.ensure_connected()
@@ -121,7 +154,7 @@ def control_home_lighting(device_id: int, brightness: int):
     Kitchen Cans=85, Foyer=87, Stairs=89, Upstairs Hall=91, Front Door=93,
     Kitchen Island=95, Downstairs Hallway=97, Upstairs Deck=99, Family Room=204,
     Breakfast=206.
-    For ALL lights: use device_id=999 with brightness=100 for All ON or brightness=0 for All OFF.
+    For ALL lights: use device_id=999 with brightness 0-100 (0 uses All OFF scene, 100 uses All ON scene).
     """
     manager = _get_manager()
     
@@ -129,7 +162,8 @@ def control_home_lighting(device_id: int, brightness: int):
     if device_id == 999:
         if brightness == 0:
             return _run_async(manager.activate_scene(3))  # All OFF scene
-        else:
+        if brightness == 100:
             return _run_async(manager.activate_scene(2))  # All ON scene
+        return _run_async(manager.set_all_lights(brightness))
     
     return _run_async(manager.set_light(device_id, brightness))
