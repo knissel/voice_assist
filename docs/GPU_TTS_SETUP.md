@@ -1,6 +1,6 @@
-# GPU TTS Setup Guide
+# GPU TTS Setup Guide (Qwen3-TTS)
 
-This guide explains how to set up high-quality XTTS v2 text-to-speech on your RTX 5090 GPU with automatic fallback to local Piper TTS on the Raspberry Pi.
+This guide explains how to set up high-quality **Qwen3-TTS** (Qwen/Qwen3-TTS-12Hz-1.7B-Base) on your RTX 5090 GPU with automatic fallback to local Piper TTS on the Raspberry Pi.
 
 ## Architecture
 
@@ -8,9 +8,9 @@ This guide explains how to set up high-quality XTTS v2 text-to-speech on your RT
 ┌─────────────────┐     HTTP/JSON      ┌─────────────────┐
 │  Raspberry Pi 5 │ ◄───────────────► │  RTX 5090 GPU   │
 │                 │                    │                 │
-│  - Wakeword     │   /synthesize      │  - XTTS v2      │
-│  - STT          │   (text → wav)     │  - High quality │
-│  - Piper (fallback)                  │  - ~200-300ms   │
+│  - Wakeword     │   /synthesize      │  - Qwen3-TTS    │
+│  - STT          │   (text → wav)     │  - Voice Cloning│
+│  - Piper (fallback)                  │  - ~200-400ms   │
 └─────────────────┘                    └─────────────────┘
 ```
 
@@ -18,78 +18,51 @@ This guide explains how to set up high-quality XTTS v2 text-to-speech on your RT
 
 ### 1. Install Dependencies
 
-#### Windows with RTX 5090 (Blackwell Architecture)
-
-The RTX 5090 uses the new Blackwell architecture (sm_120) which requires **PyTorch nightly** with CUDA 12.8:
+#### Windows with RTX 5090
+Ensure you are using the `.venv` environment used by the Voice Assistant.
 
 ```powershell
-# Install PyTorch nightly with CUDA 12.8 (required for RTX 5090)
-py -m pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+# Activate environment
+.venv\Scripts\activate
 
-# Install TTS and other dependencies
-py -m pip install flask TTS transformers==4.35.2 soundfile
+# Install Qwen3-TTS dependencies
+pip install -r requirements_qwen.txt
+
+# (Optional) Install Flash Attention 2 for faster inference
+# Note: Requires compilation environment or pre-built wheels
+pip install flash-attn --no-build-isolation
 ```
 
-> **Note**: The `transformers==4.35.2` pinning is required for XTTS v2 compatibility.
-> **Note**: `soundfile` is used for audio I/O to avoid FFmpeg dependency issues on Windows.
+**Requirements File (`requirements_qwen.txt`)**:
+- `qwen-tts`
+- `flask`
+- `soundfile`
+- `requests`
 
-#### Linux with RTX 5090
+### 2. Configure Speaker Reference
 
+Qwen3-TTS provides excellent zero-shot voice cloning.
+
+1.  **Audio File**: Place a 6-10 second WAV file of the target voice at `service\edge\src\speaker_reference.wav` (or in the root `voice_assist` directory).
+2.  **Transcript (Recommended)**: Create a text file `speaker_reference.txt` next to the WAV file containing the *exact content* of the audio.
+    - Example: If `speaker_reference.wav` says "Hello, this is a test.", create `speaker_reference.txt` with "Hello, this is a test."
+    - **Why?** Qwen3-TTS uses the text to extract better prosody and timbre matching. If simpler `x_vector` mode is used (no text), quality might be lower.
+
+### 3. Start the Server
+
+The server is automatically started by `start_5090_services.bat`.
+
+To run manually:
 ```bash
-# Install PyTorch nightly with CUDA 12.8
-pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
-
-# Install TTS and dependencies
-pip install flask TTS transformers==4.35.2 soundfile
-```
-
-#### Older GPUs (RTX 30xx/40xx)
-
-For older NVIDIA GPUs, you can use the stable PyTorch release:
-
-```bash
-# On your GPU machine
-cd voice_assist
-pip install -r requirements_gpu_server.txt
-```
-
-This installs:
-- `TTS>=0.22.0` - Coqui TTS library with XTTS v2
-- `torch>=2.0.0` - PyTorch with CUDA support
-- `torchaudio>=2.0.0` - Audio processing
-- `flask>=3.0.0` - HTTP server
-
-### 2. (Optional) Add a Speaker Reference
-
-For best results, provide a 6-30 second WAV file of the voice you want to clone:
-
-```bash
-# Place your reference audio in the repo root
-cp /path/to/your/voice.wav speaker_reference.wav
-```
-
-Or upload via API after starting the server:
-```bash
-curl -X POST -F "audio=@your_voice.wav" http://localhost:5001/set_speaker
-```
-
-### 3. Start the XTTS Server
-
-```bash
-# Basic usage (downloads model on first run, ~2GB)
-python xtts_server.py --port 5001
-
-# With custom speaker reference
-python xtts_server.py --port 5001 --speaker /path/to/voice.wav
-
-# Specify GPU device
-python xtts_server.py --port 5001 --device cuda
+.venv\Scripts\activate
+python qwen_tts_server.py --port 5001
 ```
 
 The server exposes:
-- `GET /health` - Health check
+- `GET /health` - Health check (shows loaded model and speaker status)
 - `POST /synthesize` - Synthesize text to speech
-- `POST /set_speaker` - Upload speaker reference audio
+- `POST /synthesize_stream` - Streaming synthesis (simulated)
+- `POST /set_speaker` - Upload new speaker reference audio
 
 ### 4. Test the Server
 
@@ -99,105 +72,18 @@ curl http://localhost:5001/health
 
 # Synthesize speech
 curl -X POST -H "Content-Type: application/json" \
-  -d '{"text": "Hello, this is a test.", "language": "en"}' \
+  -d '{"text": "Hello, this is a test of Qwen TTS.", "language": "English"}' \
   http://localhost:5001/synthesize --output test.wav
-
-# Play the result
-ffplay test.wav
 ```
-
-## Raspberry Pi Setup
-
-### 1. Configure Environment Variables
-
-Add to your `.env` file:
-
-```bash
-# Enable GPU TTS with Piper fallback
-USE_GPU_TTS=true
-
-# URL of your XTTS server (replace with your GPU machine's IP)
-XTTS_SERVER_URL=http://192.168.1.100:5001
-```
-
-### 2. That's It!
-
-The assistant will automatically:
-1. Try the GPU XTTS server first
-2. Fall back to local Piper if the server is unavailable or times out
-3. Cache server health status to avoid repeated failed requests
-
-## Configuration Options
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `USE_GPU_TTS` | `true` | Enable GPU TTS with fallback |
-| `XTTS_SERVER_URL` | `http://localhost:5001` | XTTS server URL |
-
-### GPU TTS Client Options
-
-The `GPUTTSClient` class accepts:
-- `server_url` - XTTS server URL
-- `timeout_seconds` - Max wait time (default: 3.0s)
-- `piper_voice` - Piper voice for fallback
-- `language` - Language code (default: "en")
-
-## Performance
-
-### Expected Latency
-
-| Component | Time |
-|-----------|------|
-| Network round-trip | 20-50ms |
-| XTTS inference (5090) | 150-300ms |
-| Audio transfer | 20-50ms |
-| **Total GPU TTS** | **200-350ms** |
-| **Piper (local)** | **100-150ms** |
-
-### Quality Comparison
-
-| TTS Engine | Quality | Naturalness | Voice Cloning |
-|------------|---------|-------------|---------------|
-| Piper (lessac-medium) | Good | Moderate | No |
-| XTTS v2 | Excellent | High | Yes |
 
 ## Troubleshooting
 
-### Server won't start
-- Ensure CUDA is available: `python -c "import torch; print(torch.cuda.is_available())"`
-- Check GPU memory: XTTS needs ~2GB VRAM
-- **RTX 5090**: If you see "sm_120 is not compatible", install PyTorch nightly with CUDA 12.8:
-  ```powershell
-  py -m pip install --pre --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
-  ```
-- **Windows torchcodec errors**: Ensure `soundfile` is installed (`pip install soundfile`). The server uses soundfile for audio I/O to avoid FFmpeg dependencies.
+### "Model not loaded"
+- Check the console logs for download errors. The model `Qwen/Qwen3-TTS-12Hz-1.7B-Base` is large (~4GB) and downloads on first run.
 
-### High latency
-- Check network: `ping <gpu-server-ip>`
-- Reduce timeout: Set `timeout_seconds=2.0` in client
-- Ensure GPU isn't throttling
+### Flash Attention Errors
+- If you see warnings about Flash Attention, the server will fall back to standard attention (`eager`). This is fine but slightly slower.
 
-### Fallback always used
-- Check server health: `curl http://<server>:5001/health`
-- Check firewall allows port 5001
-- Verify `XTTS_SERVER_URL` is correct
-
-### No speaker voice
-- Upload a reference: `curl -X POST -F "audio=@voice.wav" http://server:5001/set_speaker`
-- Use 6-30 seconds of clear speech, single speaker
-
-## Running Both Servers
-
-For a complete GPU-accelerated setup, run both Whisper and XTTS:
-
-```bash
-# Terminal 1: Whisper STT server
-python whisper_server.py --model large-v3 --port 5000
-
-# Terminal 2: XTTS TTS server  
-python xtts_server.py --port 5001 --speaker speaker_reference.wav
-```
-
-Or create a systemd service for production use.
+### Speaker Voice Doesn't Match
+- Ensure `speaker_reference.txt` exists and matches the audio!
+- Try a clearer audio sample (single speaker, no background noise).

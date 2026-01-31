@@ -1,0 +1,4 @@
+qwen-tts
+flask
+soundfile
+requests
