@@ -9,7 +9,9 @@ import contextlib
 import tempfile
 import threading
 import requests
-from typing import Optional, Tuple, Any, Dict
+import numpy as np
+import re
+from typing import Optional, Tuple, Any, Dict, Callable
 
 from google import genai
 from google.genai import types
@@ -28,6 +30,10 @@ try:
     from piper.voice import PiperVoice
 except ImportError:
     PiperVoice = None
+try:
+    from pocket_tts import TTSModel
+except ImportError:
+    TTSModel = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -62,10 +68,14 @@ class Assistant:
         
         self.clear_phrases = parse_clear_phrases(os.getenv("CONVERSATION_CLEAR_PHRASES"))
         self.reset_on_tool = os.getenv("CONVERSATION_RESET_ON_TOOL_CALL", "true").lower() == "true"
+
+        # Wakeword phrases to strip from transcript before LLM
+        wakeword_raw = os.getenv("WAKEWORD_PHRASES", "oogway")
+        self.wakeword_phrases = [p.strip().lower() for p in wakeword_raw.split(",") if p.strip()]
         
 
         # 4. TTS Configuration
-        # Options: "gpu" (XTTS/VoxCPM via 5090), "local" (Piper)
+        # Options: "gpu" (XTTS/VoxCPM via 5090), "local" (Piper), "pocket" (Pocket TTS)
         self.tts_provider = os.getenv("TTS_PROVIDER", "gpu").lower()
         
         # GPU TTS
@@ -95,11 +105,66 @@ class Assistant:
             else:
                  logger.warning("piper-tts not installed or load failed.")
 
-        # 5. Local LLM Configuration (for Hybrid Routing)
+        # Local TTS (Pocket TTS)
+        self.pocket_tts_model = None
+        self.pocket_tts_voice_state = None
+        self.pocket_streaming = os.getenv("POCKET_TTS_STREAMING", "true").lower() == "true"
+        if self.tts_provider == "pocket":
+            if TTSModel:
+                try:
+                    variant = os.getenv("POCKET_TTS_VARIANT", "b6369a24")
+                    temperature = float(os.getenv("POCKET_TTS_TEMPERATURE", "0.7"))
+                    lsd_decode_steps = int(os.getenv("POCKET_TTS_LSD_DECODE_STEPS", "1"))
+                    eos_threshold = float(os.getenv("POCKET_TTS_EOS_THRESHOLD", "-4.0"))
+                    noise_clamp_raw = os.getenv("POCKET_TTS_NOISE_CLAMP", "").strip().lower()
+                    noise_clamp = None if noise_clamp_raw in {"", "none", "null"} else float(noise_clamp_raw)
+                    voice_prompt = os.getenv(
+                        "POCKET_TTS_VOICE",
+                        "alba"
+                    )
+                    self.pocket_tts_model = TTSModel.load_model(
+                        variant=variant,
+                        temp=temperature,
+                        lsd_decode_steps=lsd_decode_steps,
+                        noise_clamp=noise_clamp,
+                        eos_threshold=eos_threshold
+                    )
+                    self.pocket_tts_voice_state = self.pocket_tts_model.get_state_for_audio_prompt(
+                        voice_prompt
+                    )
+                    logger.info(
+                        "Loaded Pocket TTS model (variant=%s, voice=%s)",
+                        variant,
+                        voice_prompt
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to load Pocket TTS model: {e}")
+            else:
+                logger.warning("pocket-tts not installed or load failed.")
+
+        # 5. TTS Response Cache (pre-baked phrases)
+        self.tts_cache_enabled = os.getenv("TTS_CACHE_ENABLED", "true").lower() == "true"
+        self.tts_prebaked_phrases = self._parse_prebaked_phrases(
+            os.getenv("TTS_PREBAKED_PHRASES", "done,ok,okay")
+        )
+        self.tts_prebake_on_start = os.getenv("TTS_PREBAKE_ON_START", "false").lower() == "true"
+        self._tts_cache: Dict[str, bytes] = {}
+        self._tts_cache_lock = threading.Lock()
+        self._tts_prebaked_keys = {self._tts_cache_key(p) for p in self.tts_prebaked_phrases}
+        if self.tts_cache_enabled and self.tts_prebake_on_start and self._tts_prebaked_keys:
+            threading.Thread(target=self._warm_tts_cache, daemon=True).start()
+
+        # 6. Local LLM Configuration (for Hybrid Routing)
         self.local_llm_url = os.getenv("LOCAL_LLM_URL", "http://localhost:8080/v1")
         self.use_local_llm = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
 
-    def process_voice_command(self, audio_path: str) -> Tuple[str, Optional[bytes], int]:
+    def process_voice_command(
+        self,
+        audio_path: str,
+        stream_callback: Optional[Callable[[np.ndarray, int], None]] = None,
+        on_tts_start: Optional[Callable[[], None]] = None,
+        on_tts_end: Optional[Callable[[], None]] = None
+    ) -> Tuple[str, Optional[bytes], int]:
         """
         Full pipeline: Audio File -> Transcript -> LLM/Tools -> TTS Audio.
         Returns: (response_text, audio_wav_bytes, latency_ms)
@@ -109,12 +174,14 @@ class Assistant:
         # 1. Transcribe
         emit_state_changed(self.bus, "listening", "transcribing")
         transcript = self.transcription.transcribe(audio_path)
+        transcript = self._strip_wakeword_phrase(transcript)
         
         if not transcript:
             emit_state_changed(self.bus, "transcribing", "idle")
             return "", None, int((time.time() - start_time) * 1000)
             
         emit_transcript(self.bus, transcript, is_final=True)
+        logger.info(f"📝 STT transcript: {transcript}")
         
         # 2. Think (Hybrid Routing)
         emit_state_changed(self.bus, "transcribing", "thinking")
@@ -143,22 +210,28 @@ class Assistant:
         if response_text:
             emit_assistant_text(self.bus, response_text)
             emit_state_changed(self.bus, "thinking", "speaking")
-            
-            # Select TTS Strategy
-            if self.tts_provider == "local" and self.piper_voice:
-                audio_bytes = self._synthesize_local_tts(response_text)
-            else:
-                audio_bytes = self._synthesize_gpu_tts(response_text)
+            logger.info(f"🗣️ TTS response: {response_text}")
+
+            # Select TTS Strategy (use cache for pre-baked phrases)
+            is_prebaked = self._is_prebaked_phrase(response_text)
+            if is_prebaked:
+                audio_bytes = self._get_cached_tts(response_text)
+
+            if audio_bytes is None:
+                allow_streaming = not is_prebaked
+                audio_bytes = self._synthesize_tts_bytes(
+                    response_text,
+                    stream_callback=stream_callback,
+                    on_tts_start=on_tts_start,
+                    on_tts_end=on_tts_end,
+                    allow_streaming=allow_streaming
+                )
+                if is_prebaked and audio_bytes:
+                    self._store_cached_tts(response_text, audio_bytes)
             # Note: The caller (main.py) is responsible for playing the audio
             # and setting state back to 'idle' after playback.
         else:
-             emit_state_changed(self.bus, "thinking", "idle")
-
-        latency_ms = int((time.time() - start_time) * 1000)
-        return response_text, audio_bytes, latency_ms
-
-        else:
-             emit_state_changed(self.bus, "thinking", "idle")
+            emit_state_changed(self.bus, "thinking", "idle")
 
         latency_ms = int((time.time() - start_time) * 1000)
         return response_text, audio_bytes, latency_ms
@@ -187,6 +260,17 @@ class Assistant:
             return False
             
         return is_simple
+
+    def _strip_wakeword_phrase(self, text: str) -> str:
+        if not text:
+            return text
+        stripped = text.strip()
+        for phrase in self.wakeword_phrases:
+            pattern = rf"^{re.escape(phrase)}[\\s,;:!?.-]*"
+            updated = re.sub(pattern, "", stripped, flags=re.IGNORECASE)
+            if updated != stripped:
+                return updated.strip()
+        return stripped
 
     def _process_local_llm(self, user_text: str) -> str:
         """Call a local OpenAI-compatible endpoint (e.g. llama-server)."""
@@ -313,6 +397,76 @@ class Assistant:
         contents.append(types.Content(role="user", parts=[types.Part(text=text)]))
         return contents
 
+    def _parse_prebaked_phrases(self, raw: Optional[str]) -> list:
+        if not raw:
+            return []
+        return [p.strip() for p in raw.split(",") if p.strip()]
+
+    def _normalize_tts_text(self, text: str) -> str:
+        if not text:
+            return ""
+        cleaned = text
+        if self.tts_provider in {"gpu", "pocket"}:
+            cleaned = preprocess_for_tts(text)
+        return " ".join(cleaned.strip().lower().split())
+
+    def _tts_cache_key(self, text: str) -> str:
+        normalized = self._normalize_tts_text(text)
+        return f"{self.tts_provider}:{normalized}"
+
+    def _is_prebaked_phrase(self, text: str) -> bool:
+        if not self.tts_cache_enabled or not self._tts_prebaked_keys:
+            return False
+        return self._tts_cache_key(text) in self._tts_prebaked_keys
+
+    def _get_cached_tts(self, text: str) -> Optional[bytes]:
+        if not self.tts_cache_enabled:
+            return None
+        key = self._tts_cache_key(text)
+        with self._tts_cache_lock:
+            return self._tts_cache.get(key)
+
+    def _store_cached_tts(self, text: str, audio_bytes: Optional[bytes]) -> None:
+        if not self.tts_cache_enabled or not audio_bytes:
+            return
+        key = self._tts_cache_key(text)
+        with self._tts_cache_lock:
+            if key not in self._tts_cache:
+                self._tts_cache[key] = audio_bytes
+
+    def _warm_tts_cache(self) -> None:
+        for phrase in self.tts_prebaked_phrases:
+            if not phrase:
+                continue
+            if self._get_cached_tts(phrase):
+                continue
+            audio_bytes = self._synthesize_tts_bytes(phrase, allow_streaming=False)
+            if audio_bytes:
+                self._store_cached_tts(phrase, audio_bytes)
+
+    def _synthesize_tts_bytes(
+        self,
+        text: str,
+        stream_callback: Optional[Callable[[np.ndarray, int], None]] = None,
+        on_tts_start: Optional[Callable[[], None]] = None,
+        on_tts_end: Optional[Callable[[], None]] = None,
+        allow_streaming: bool = True
+    ) -> Optional[bytes]:
+        if self.tts_provider == "local" and self.piper_voice:
+            return self._synthesize_local_tts(text)
+        if self.tts_provider == "pocket" and self.pocket_tts_model:
+            if allow_streaming and self.pocket_streaming and stream_callback:
+                streamed = self._stream_pocket_tts(
+                    text,
+                    stream_callback,
+                    on_tts_start=on_tts_start,
+                    on_tts_end=on_tts_end
+                )
+                if streamed:
+                    return None
+            return self._synthesize_pocket_tts(text)
+        return self._synthesize_gpu_tts(text)
+
     def _synthesize_local_tts(self, text: str) -> Optional[bytes]:
         """Synthesize using local Piper model."""
         if not text or not self.piper_voice:
@@ -356,3 +510,62 @@ class Assistant:
             logger.error(f"TTS Error: {e}")
             
         return None
+
+    def _synthesize_pocket_tts(self, text: str) -> Optional[bytes]:
+        """Synthesize using local Pocket TTS model."""
+        if not text or not self.pocket_tts_model or not self.pocket_tts_voice_state:
+            return None
+
+        try:
+            start = time.time()
+            clean = preprocess_for_tts(text)
+            audio = self.pocket_tts_model.generate_audio(self.pocket_tts_voice_state, clean)
+            audio_np = audio.detach().cpu().numpy().squeeze()
+            audio_np = np.clip(audio_np, -1.0, 1.0)
+            audio_int16 = (audio_np * 32767.0).astype(np.int16)
+
+            buf = io.BytesIO()
+            with wave.open(buf, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(self.pocket_tts_model.sample_rate)
+                wf.writeframes(audio_int16.tobytes())
+
+            dur = (time.time() - start) * 1000
+            logger.info(f"🔊 Pocket TTS: {dur:.0f}ms")
+            return buf.getvalue()
+        except Exception as e:
+            logger.error(f"Pocket TTS Error: {e}")
+            return None
+
+    def _stream_pocket_tts(
+        self,
+        text: str,
+        stream_callback: Callable[[np.ndarray, int], None],
+        on_tts_start: Optional[Callable[[], None]] = None,
+        on_tts_end: Optional[Callable[[], None]] = None
+    ) -> bool:
+        """Stream Pocket TTS audio chunks to a callback."""
+        if not text or not self.pocket_tts_model or not self.pocket_tts_voice_state:
+            return False
+
+        try:
+            if on_tts_start:
+                on_tts_start()
+            clean = preprocess_for_tts(text)
+            for chunk in self.pocket_tts_model.generate_audio_stream(self.pocket_tts_voice_state, clean):
+                if chunk is None:
+                    continue
+                chunk_np = chunk.detach().cpu().numpy().squeeze()
+                if chunk_np.size == 0:
+                    continue
+                chunk_np = np.clip(chunk_np, -1.0, 1.0)
+                chunk_int16 = (chunk_np * 32767.0).astype(np.int16)
+                stream_callback(chunk_int16, self.pocket_tts_model.sample_rate)
+            return True
+        except Exception as e:
+            logger.error(f"Pocket TTS Stream Error: {e}")
+            return False
+        finally:
+            if on_tts_end:
+                on_tts_end()

@@ -10,7 +10,7 @@ httpx>=0.25.0
 # Audio
 pyaudio>=0.2.13
 sounddevice>=0.4.6
-numpy>=1.24.0,<2.0.0
+numpy>=2.0.0
 scipy>=1.10.0
 
 # Wake word detection
@@ -24,6 +24,7 @@ pyusb>=1.2.1
 
 # TTS (local, fast)
 piper-tts>=1.2.0
+pocket-tts>=1.0.3
 
 # VAD - use ONNX version for lower memory on Pi
 onnxruntime>=1.16.0
