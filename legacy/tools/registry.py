@@ -173,7 +173,7 @@ GEMINI_TOOLS = [
                     required=[]
                 )
             ),
-            types.FunctionDeclaration(
+            # types.FunctionDeclaration(
             #     name="pizza_dough_recipe",
             #     description=(
             #         "Create or adjust a pizza dough recipe using baker's percentages. "
