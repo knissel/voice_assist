@@ -61,7 +61,7 @@ python qwen_tts_server.py --port 5001
 The server exposes:
 - `GET /health` - Health check (shows loaded model and speaker status)
 - `POST /synthesize` - Synthesize text to speech
-- `POST /synthesize_stream` - Streaming synthesis (simulated)
+- `POST /synthesize_stream` - Streaming synthesis (segment-based)
 - `POST /set_speaker` - Upload new speaker reference audio
 
 ### 4. Test the Server

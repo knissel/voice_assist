@@ -2,9 +2,7 @@ import requests
 
 # List of prompts you want to try
 prompts = [
-    "The quick brown fox jumps over the lazy dog.",
-    "I can say anything you want with high quality voice cloning!",
-    "Testing the emotional range of the new Qwen three T T S model."
+    "This is Jay Nissel and I love Bo Nissel and Kenny Nissel. I am amazing at pickleball!"
 ]
 
 for i, text in enumerate(prompts):
