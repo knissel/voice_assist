@@ -283,6 +283,12 @@ class EdgeAssistant:
         if "inference_framework" in params:
             init_kwargs["inference_framework"] = "onnx"
         self.wakeword_detector = OpenWakeWordModel(**init_kwargs)
+        model_names = ", ".join(os.path.basename(p) for p in resolved) if resolved else "(none)"
+        print(
+            f"[WAKE] Models: {model_names} | threshold={WAKEWORD_THRESHOLD} "
+            f"| debounce={WAKEWORD_DEBOUNCE_FRAMES} | feed_frames={WAKEWORD_FEED_FRAMES} "
+            f"| buffer_frames={WAKEWORD_BUFFER_FRAMES} | vad_gate={WAKEWORD_VAD_GATE}"
+        )
 
     def _setup_vad(self):
         vad_path = os.path.join(self.repo_root, "models", "silero_vad.jit")
@@ -463,6 +469,17 @@ class EdgeAssistant:
                 
                 scores = self.wakeword_detector.predict(feed)
                 found = scores and max(scores.values()) >= WAKEWORD_THRESHOLD
+                if self._wakeword_debug and scores:
+                    now = time.time()
+                    if now - self._wakeword_debug_last >= 0.5:
+                        label, score = max(scores.items(), key=lambda kv: kv[1])
+                        rms = float(np.sqrt(np.mean(pcm.astype(np.float32) ** 2)))
+                        print(
+                            f"[WAKE][DEBUG] best={label} score={score:.3f} "
+                            f"threshold={WAKEWORD_THRESHOLD:.3f} rms={rms:.1f} "
+                            f"hits={len(self._wakeword_hits)}/{WAKEWORD_DEBOUNCE_FRAMES}"
+                        )
+                        self._wakeword_debug_last = now
                 if found:
                     self._wakeword_hits.append(1)
                 else:

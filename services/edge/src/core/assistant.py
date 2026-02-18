@@ -70,7 +70,7 @@ class Assistant:
         self.reset_on_tool = os.getenv("CONVERSATION_RESET_ON_TOOL_CALL", "true").lower() == "true"
 
         # Wakeword phrases to strip from transcript before LLM
-        wakeword_raw = os.getenv("WAKEWORD_PHRASES", "oogway")
+        wakeword_raw = os.getenv("WAKEWORD_PHRASES", "hey jarvis")
         self.wakeword_phrases = [p.strip().lower() for p in wakeword_raw.split(",") if p.strip()]
         
 
