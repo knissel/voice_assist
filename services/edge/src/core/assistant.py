@@ -370,6 +370,7 @@ class Assistant:
             # Handle Response / Tool Calls
             final_text = ""
             has_tool = False
+            tool_outputs = []
             
             if response.candidates and response.candidates[0].content.parts:
                 for part in response.candidates[0].content.parts:
@@ -385,14 +386,22 @@ class Assistant:
                             t_start = time.time()
                             result = dispatch_tool(t_name, t_args)
                             dur = int((time.time() - t_start) * 1000)
-                            emit_tool_result(self.bus, t_name, True, str(result), dur)
+                            result_text = str(result)
+                            tool_outputs.append(result_text)
+                            emit_tool_result(self.bus, t_name, True, result_text, dur)
                         except Exception as e:
+                            tool_outputs.append(str(e))
                             emit_tool_result(self.bus, t_name, False, str(e))
             
                 if has_tool:
                     if self.memory and self.reset_on_tool:
                         self.memory.reset()
-                    final_text = "Done" # Simple acknowledgement for actions
+                    if len(tool_outputs) == 1:
+                        final_text = tool_outputs[0]
+                    elif len(tool_outputs) > 1:
+                        final_text = " ".join(tool_outputs)
+                    else:
+                        final_text = "Done"
                 else:
                     final_text = response.text or ""
                     if self.memory and use_history and final_text:

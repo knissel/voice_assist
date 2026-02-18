@@ -6,6 +6,7 @@ import os
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 from http.cookies import SimpleCookie
 from ytmusicapi import YTMusic
@@ -13,6 +14,37 @@ from tools.audio import pause_media, clear_media_pause_state, is_media_paused_by
 
 _active_headless_process = None
 _AUTO_AUTH_HEADERS = None
+
+
+def _summarize_error(text: str, max_len: int = 220) -> str:
+    if not text:
+        return ""
+    compact = " ".join(text.split())
+    if len(compact) <= max_len:
+        return compact
+    return compact[: max_len - 3] + "..."
+
+
+def _is_youtube_auth_block(error_text: str) -> bool:
+    if not error_text:
+        return False
+    text = error_text.lower()
+    needles = (
+        "sign in to confirm you're not a bot",
+        "sign in to confirm you’re not a bot",
+        "use --cookies-from-browser",
+        "cookies are required",
+        "login required",
+        "this video is unavailable",
+    )
+    return any(needle in text for needle in needles)
+
+
+def _headless_auth_help() -> str:
+    return (
+        "Headless playback is blocked by YouTube auth. Set "
+        "YTMUSIC_COOKIES_FROM_BROWSER=edge (or chrome/brave) or configure oauth.json with valid headers."
+    )
 
 
 def _stop_headless_playback():
@@ -533,65 +565,93 @@ def play_youtube_music(query: str, content_type: str = "song"):
             mpv_path = shutil.which("mpv")
             ytdlp_path = _resolve_ytdlp_path()
             ffplay_path = shutil.which("ffplay")
+            mpv_exit_code = None
+            audio_url = None
 
-            if mpv_path:
-                mpv_args = [mpv_path, "--no-video", "--really-quiet"]
-                if ytdlp_path:
-                    mpv_args.append(f"--script-opts=ytdl_hook-ytdl_path={ytdlp_path}")
-                mpv_args += _build_mpv_audio_args()
-                raw_options = _build_mpv_raw_options(manager.auth_headers)
-                if raw_options:
-                    mpv_args.append(f"--ytdl-raw-options={','.join(raw_options)}")
-                mpv_args.append(url)
-                _active_headless_process = subprocess.Popen(
-                    mpv_args,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                if content_type == "playlist":
-                    return f"Playing playlist: {result.get('title', query)}"
-                return f"Now playing: {result.get('title', 'Unknown')} by {result.get('artist', 'Unknown')}"
-
-            if not ytdlp_path:
-                return "Headless playback requires mpv or yt-dlp+ffplay. Install with: sudo apt-get install mpv"
-
-            if not ffplay_path:
-                return "Headless playback requires ffplay (ffmpeg). Install with: sudo apt-get install ffmpeg"
-
-            # Fallback to yt-dlp + ffplay
-            try:
+            if ytdlp_path:
                 ytdlp_args = [ytdlp_path, "-f", "bestaudio", "-g"]
                 if content_type == "playlist":
                     ytdlp_args += ["--playlist-items", "1"]
                 ytdlp_args += _build_ytdlp_auth_args(manager.auth_headers)
                 ytdlp_args += _build_ytdlp_runtime_args()
                 ytdlp_args.append(url)
-
-                # Use yt-dlp to get direct audio stream URL
-                audio_output = subprocess.check_output(
+                ytdlp_result = subprocess.run(
                     ytdlp_args,
-                    stderr=subprocess.DEVNULL,
+                    capture_output=True,
                     text=True
                 )
-                audio_url = ""
-                for line in audio_output.splitlines():
+                if ytdlp_result.returncode != 0:
+                    details = _summarize_error(ytdlp_result.stderr or ytdlp_result.stdout)
+                    if _is_youtube_auth_block(details):
+                        return _headless_auth_help()
+                    if details:
+                        return f"Headless playback failed to resolve stream URL: {details}"
+                    return "Headless playback failed to resolve stream URL."
+
+                for line in ytdlp_result.stdout.splitlines():
                     if line.strip():
                         audio_url = line.strip()
                         break
                 if not audio_url:
                     return "Failed to get audio stream URL for headless playback."
 
-                # Play with ffplay (part of ffmpeg)
+            if mpv_path:
+                mpv_args = [mpv_path, "--no-video", "--really-quiet"]
+                mpv_target = audio_url if audio_url and content_type != "playlist" else url
+                if mpv_target == url and ytdlp_path:
+                    mpv_args.append(f"--script-opts=ytdl_hook-ytdl_path={ytdlp_path}")
+                mpv_args += _build_mpv_audio_args()
+                if mpv_target == url:
+                    raw_options = _build_mpv_raw_options(manager.auth_headers)
+                    if raw_options:
+                        mpv_args.append(f"--ytdl-raw-options={','.join(raw_options)}")
+                mpv_args.append(mpv_target)
                 _active_headless_process = subprocess.Popen(
-                    [ffplay_path, "-nodisp", "-autoexit", "-loglevel", "quiet", audio_url],
+                    mpv_args,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
-                if content_type == "playlist":
-                    return f"Playing first track from playlist: {result.get('title', query)} (install mpv for full playlist)"
-                return f"Now playing: {result.get('title', 'Unknown')} by {result.get('artist', 'Unknown')}"
-            except subprocess.CalledProcessError:
-                return "Headless playback failed to resolve stream URL. Try installing mpv."
+                try:
+                    startup_wait_ms = int(os.getenv("YTMUSIC_MPV_STARTUP_WAIT_MS", "3200"))
+                except ValueError:
+                    startup_wait_ms = 3200
+                if startup_wait_ms > 0:
+                    time.sleep(startup_wait_ms / 1000.0)
+                if _active_headless_process.poll() is None:
+                    if content_type == "playlist":
+                        return f"Playing playlist: {result.get('title', query)}"
+                    return f"Now playing: {result.get('title', 'Unknown')} by {result.get('artist', 'Unknown')}"
+                mpv_exit_code = _active_headless_process.returncode
+                _active_headless_process = None
+
+            if not ytdlp_path:
+                if mpv_exit_code is not None:
+                    return (
+                        f"Headless playback failed (mpv exited with code {mpv_exit_code}). "
+                        "Install yt-dlp and ffmpeg for fallback playback."
+                    )
+                return "Headless playback requires mpv or yt-dlp+ffplay. Install with: sudo apt-get install mpv"
+
+            if not ffplay_path:
+                return "Headless playback requires ffplay (ffmpeg). Install with: sudo apt-get install ffmpeg"
+
+            if not audio_url:
+                return "Failed to get audio stream URL for headless playback."
+
+            # Play with ffplay (part of ffmpeg).
+            _active_headless_process = subprocess.Popen(
+                [ffplay_path, "-nodisp", "-autoexit", "-loglevel", "quiet", audio_url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            time.sleep(0.4)
+            if _active_headless_process.poll() is not None:
+                ffplay_exit_code = _active_headless_process.returncode
+                _active_headless_process = None
+                return f"Headless playback failed (ffplay exited with code {ffplay_exit_code})."
+            if content_type == "playlist":
+                return f"Playing first track from playlist: {result.get('title', query)} (install mpv for full playlist)"
+            return f"Now playing: {result.get('title', 'Unknown')} by {result.get('artist', 'Unknown')}"
         else:
             # Browser mode: open in default browser
             system = platform.system()
