@@ -21,6 +21,7 @@ from core.event_bus import (
     emit_assistant_text, emit_tool_call, emit_tool_result, emit_error
 )
 from core.conversation import ConversationMemory, parse_clear_phrases, should_clear_history
+from core.runtime_mode import EDGE_MODE_LOCAL, resolve_edge_mode
 from core.tts_preprocessing import preprocess_for_tts
 from tools.transcription import create_transcription_service
 from tools.registry import GEMINI_TOOLS, dispatch_tool
@@ -54,6 +55,7 @@ class Assistant:
             logger.warning("⚠️ GEMINI_API_KEY not found. LLM features will fail.")
         self.client = genai.Client(api_key=self.api_key)
         self.model_name = os.getenv("MODEL_NAME", "gemini-2.5-flash-lite")
+        self.edge_mode = resolve_edge_mode()
         
         # 2. Transcription Service
         self.transcription = create_transcription_service()
@@ -77,6 +79,10 @@ class Assistant:
         # 4. TTS Configuration
         # Options: "gpu" (XTTS/VoxCPM via 5090), "local" (Piper), "pocket" (Pocket TTS)
         self.tts_provider = os.getenv("TTS_PROVIDER", "gpu").lower()
+        if self.edge_mode == EDGE_MODE_LOCAL and self.tts_provider == "gpu":
+            raise RuntimeError(
+                "EDGE_MODE=local cannot use TTS_PROVIDER=gpu. Use TTS_PROVIDER=pocket or TTS_PROVIDER=local."
+            )
         
         # GPU TTS
         self.xtts_url = os.getenv("XTTS_SERVER_URL", "http://localhost:5001")
@@ -157,6 +163,26 @@ class Assistant:
         # 6. Local LLM Configuration (for Hybrid Routing)
         self.local_llm_url = os.getenv("LOCAL_LLM_URL", "http://localhost:8080/v1")
         self.use_local_llm = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
+        self._log_runtime_routing()
+
+    def _log_runtime_routing(self) -> None:
+        if self.edge_mode == EDGE_MODE_LOCAL:
+            stt_route = "local"
+        elif getattr(self.transcription, "remote_url", None):
+            stt_route = "remote->local fallback"
+        else:
+            stt_route = "local"
+
+        if self.tts_provider == "gpu":
+            tts_route = "gpu(remote XTTS)"
+        elif self.tts_provider == "pocket":
+            tts_route = "pocket(local)"
+        elif self.tts_provider == "local":
+            tts_route = "piper(local)"
+        else:
+            tts_route = self.tts_provider
+
+        logger.info("🚦 EDGE_MODE=%s | STT=%s | TTS=%s", self.edge_mode, stt_route, tts_route)
 
     def process_voice_command(
         self,
