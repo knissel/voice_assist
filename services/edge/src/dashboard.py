@@ -1,19 +1,34 @@
+"""
+Edge Status Dashboard + UI Gateway.
+Serves the built React UI, exposes status APIs, and provides SSE/command endpoints.
+"""
+from __future__ import annotations
 
-"""
-Edge Status Dashboard - Lightweight web UI for monitoring the voice assistant.
-"""
-import threading
-from flask import Flask, jsonify, render_template_string
-import time
-import requests
+import json
 import os
+import queue
+import threading
+import time
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+import requests
 from dotenv import load_dotenv
+from flask import (
+    Flask,
+    Response,
+    jsonify,
+    render_template_string,
+    request,
+    send_from_directory,
+    stream_with_context,
+)
 
 load_dotenv()
 
 app = Flask(__name__)
 
-# Shared state (will be set by main.py)
+# Shared status state (updated by main.py event callbacks)
 _state = {
     "status": "initializing",
     "last_transcript": None,
@@ -25,203 +40,170 @@ _state = {
     "end_to_final_ms": None,
 }
 
+# UI gateway wiring (configured by main.py)
+_event_bus = None
+_event_bus_callback = None
+_command_dispatcher: Optional[Callable[[str, dict[str, Any]], str]] = None
+
+# SSE fan-out state
+_sse_clients: list[queue.Queue] = []
+_sse_lock = threading.Lock()
+
+# Built frontend location
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
+
+
 def update_state(key, value):
-    """Update the shared state."""
+    """Update shared status state."""
     _state[key] = value
     if key in ["status", "last_transcript", "last_response"]:
         _state["last_activity"] = time.strftime("%H:%M:%S")
 
+
 def get_state():
-    """Get the current state."""
+    """Get a shallow copy of current status."""
     return _state.copy()
 
-# HTML Template
+
+def _format_sse(payload: dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def publish_event(event_payload: dict[str, Any]) -> None:
+    """Broadcast an event payload to all SSE subscribers."""
+    with _sse_lock:
+        subscribers = list(_sse_clients)
+
+    for client_q in subscribers:
+        try:
+            client_q.put_nowait(event_payload)
+        except queue.Full:
+            # Drop oldest client events under pressure; keep server responsive.
+            continue
+
+
+def set_event_bus(event_bus) -> None:
+    """Attach EventBus and bridge all events into SSE."""
+    global _event_bus, _event_bus_callback
+
+    if event_bus is _event_bus:
+        return
+
+    # Unsubscribe old callback if any.
+    if _event_bus is not None and _event_bus_callback is not None:
+        try:
+            _event_bus.unsubscribe("*", _event_bus_callback)
+        except Exception:
+            pass
+
+    _event_bus = event_bus
+
+    if _event_bus is None:
+        _event_bus_callback = None
+        return
+
+    def on_event(event):
+        publish_event(event.to_dict())
+
+    _event_bus_callback = on_event
+    _event_bus.subscribe("*", _event_bus_callback)
+
+
+def set_command_dispatcher(dispatcher: Callable[[str, dict[str, Any]], str]) -> None:
+    """Register a command dispatcher used by /api/ui/command."""
+    global _command_dispatcher
+    _command_dispatcher = dispatcher
+
+
+# Fallback HTML used when the React build is not present.
 DASHBOARD_HTML = """
 <!DOCTYPE html>
-<html lang="en">
+<html lang=\"en\">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice Assistant - Edge Dashboard</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-            color: #e8e8e8;
-            min-height: 100vh;
-            padding: 2rem;
-        }
-        .container { max-width: 800px; margin: 0 auto; }
-        h1 {
-            text-align: center;
-            margin-bottom: 2rem;
-            font-size: 2rem;
-            background: linear-gradient(90deg, #00d9ff, #00ff88);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        .card {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            backdrop-filter: blur(10px);
-        }
-        .status-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 0.75rem 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-        .status-row:last-child { border-bottom: none; }
-        .label { color: #888; font-size: 0.9rem; }
-        .value { font-weight: 600; font-size: 1.1rem; }
-        .status-badge {
-            padding: 0.5rem 1rem;
-            border-radius: 20px;
-            font-weight: 600;
-            text-transform: uppercase;
-            font-size: 0.8rem;
-        }
-        .status-listening { background: #00ff8840; color: #00ff88; }
-        .status-recording { background: #ff880040; color: #ff8800; animation: pulse 1s infinite; }
-        .status-processing { background: #00d9ff40; color: #00d9ff; animation: pulse 0.5s infinite; }
-        .status-speaking { background: #d900ff40; color: #d900ff; }
-        .status-initializing { background: #88888840; color: #888888; }
-        .status-online { background: #00ff8840; color: #00ff88; }
-        .status-offline { background: #ff444440; color: #ff4444; }
-        .status-unknown { background: #88888840; color: #888888; }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .transcript-box {
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 8px;
-            padding: 1rem;
-            margin-top: 0.5rem;
-            font-family: monospace;
-            min-height: 60px;
-            color: #00d9ff;
-        }
-        .response-box {
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 8px;
-            padding: 1rem;
-            margin-top: 0.5rem;
-            min-height: 60px;
-            color: #00ff88;
-        }
-        .section-title {
-            font-size: 0.8rem;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 1rem;
-        }
-        .nodes-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
-        }
-        .node-card {
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 12px;
-            padding: 1rem;
-            text-align: center;
-        }
-        .node-name { font-size: 0.9rem; color: #888; margin-bottom: 0.5rem; }
-        .node-status { font-size: 1.2rem; font-weight: bold; }
-        .latency { font-size: 0.8rem; color: #666; margin-top: 0.25rem; }
-    </style>
+  <meta charset=\"UTF-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
+  <title>Voice Assistant - Edge Dashboard</title>
+  <style>
+    :root {
+      --bg: #101322;
+      --card: #1a1f33;
+      --text: #f4f7ff;
+      --muted: #9aa3bd;
+      --accent: #17d4ff;
+      --accent2: #ff7a18;
+      --ok: #32d583;
+      --err: #f97066;
+      --bd: #2b3350;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Avenir Next", "Trebuchet MS", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(900px 420px at 15% -5%, rgba(23,212,255,0.22), transparent 60%),
+        radial-gradient(840px 480px at 85% 8%, rgba(255,122,24,0.18), transparent 60%),
+        var(--bg);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .panel {
+      width: min(960px, 100%);
+      background: color-mix(in oklab, var(--card), black 5%);
+      border: 1px solid var(--bd);
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 22px 50px rgba(0,0,0,0.35);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.35rem;
+      letter-spacing: 0.04em;
+    }
+    p { margin: 0 0 16px; color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .card {
+      border: 1px solid var(--bd);
+      border-radius: 14px;
+      padding: 12px;
+      background: rgba(255,255,255,0.02);
+    }
+    .label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .value { margin-top: 6px; font-size: 1.05rem; font-weight: 700; }
+    .ok { color: var(--ok); }
+    .err { color: var(--err); }
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Voice Assistant Dashboard</h1>
-        
-        <div class="card">
-            <div class="section-title">System Status</div>
-            <div class="nodes-grid">
-                <div class="node-card">
-                    <div class="node-name">Assistant (Local)</div>
-                    <div class="node-status">
-                        <span id="edge-status" class="status-badge status-initializing">Initializing</span>
-                    </div>
-                    <div class="latency" id="edge-time">--</div>
-                </div>
-                <div class="node-card">
-                    <div class="node-name">Remote Services (5090)</div>
-                    <div class="node-status">
-                        <span id="remote-status" class="status-badge status-unknown">Unknown</span>
-                    </div>
-                    <div class="latency" id="remote-latency">--</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="section-title">Last Interaction</div>
-            <div class="status-row">
-                <span class="label">You said:</span>
-            </div>
-            <div class="transcript-box" id="transcript">Waiting for input...</div>
-            <div class="status-row" style="margin-top: 1rem;">
-                <span class="label">Assistant response:</span>
-            </div>
-            <div class="response-box" id="response">--</div>
-        </div>
+  <section class=\"panel\">
+    <h1>Edge UI Build Not Found</h1>
+    <p>The Flask API is running. Build the React frontend with <code>npm run build</code> in <code>services/edge/frontend</code>.</p>
+    <div class=\"grid\">
+      <article class=\"card\"><div class=\"label\">API</div><div class=\"value ok\">/api/status</div></article>
+      <article class=\"card\"><div class=\"label\">Events</div><div class=\"value ok\">/api/ui/events</div></article>
+      <article class=\"card\"><div class=\"label\">Commands</div><div class=\"value\">/api/ui/command</div></article>
     </div>
-
-    <script>
-        function updateDashboard() {
-            fetch('/api/status')
-                .then(r => r.json())
-                .then(data => {
-                    // Edge status
-                    const edgeEl = document.getElementById('edge-status');
-                    edgeEl.textContent = data.status;
-                    edgeEl.className = 'status-badge status-' + data.status.toLowerCase();
-                    document.getElementById('edge-time').textContent = 
-                        data.last_activity ? 'Last: ' + data.last_activity : '--';
-
-                    // Remote status
-                    const remoteEl = document.getElementById('remote-status');
-                    remoteEl.textContent = data.remote_status;
-                    remoteEl.className = 'status-badge status-' + data.remote_status.toLowerCase();
-                    const healthLatency = data.remote_latency_ms ? data.remote_latency_ms + 'ms' : '--';
-                    const endToFinal = data.end_to_final_ms ? ' | Process: ' + data.end_to_final_ms + 'ms' : '';
-                    document.getElementById('remote-latency').textContent = healthLatency + endToFinal;
-
-                    // Transcript
-                    document.getElementById('transcript').textContent = 
-                        data.last_transcript || 'Waiting for input...';
-                    document.getElementById('response').textContent = 
-                        data.last_response || '--';
-                });
-        }
-
-        // Update every second
-        setInterval(updateDashboard, 1000);
-        updateDashboard();
-    </script>
+  </section>
 </body>
 </html>
 """
 
-@app.route('/')
-def dashboard():
-    return render_template_string(DASHBOARD_HTML)
 
-@app.route('/api/status')
+@app.route("/api/status")
 def api_status():
-    # Check 5090 health
+    """Polling status API used by the frontend for health/metrics."""
     try:
         start = time.time()
-        # Use simple timeout
         resp = requests.get(f"{_state['remote_url']}/health", timeout=1.0)
         latency = int((time.time() - start) * 1000)
         if resp.status_code == 200:
@@ -233,20 +215,174 @@ def api_status():
     except Exception:
         _state["remote_status"] = "offline"
         _state["remote_latency_ms"] = None
-    
+
     return jsonify(_state)
 
+
+@app.route("/api/ui/events")
+def api_ui_events():
+    """Server-Sent Events stream for realtime assistant events."""
+
+    @stream_with_context
+    def stream():
+        client_q: queue.Queue = queue.Queue(maxsize=300)
+        with _sse_lock:
+            _sse_clients.append(client_q)
+
+        try:
+            yield "retry: 3000\n\n"
+            yield _format_sse(
+                {
+                    "type": "ui_connected",
+                    "data": {"message": "event stream connected"},
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                }
+            )
+
+            while True:
+                try:
+                    payload = client_q.get(timeout=15)
+                    yield _format_sse(payload)
+                except queue.Empty:
+                    yield ": keep-alive\n\n"
+        finally:
+            with _sse_lock:
+                if client_q in _sse_clients:
+                    _sse_clients.remove(client_q)
+
+    return Response(
+        stream(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@app.route("/api/ui/command", methods=["POST"])
+def api_ui_command():
+    """Command endpoint used by touch UI actions."""
+    payload = request.get_json(silent=True) or {}
+    tool = payload.get("tool")
+    args = payload.get("args", {})
+
+    if not isinstance(tool, str) or not tool.strip():
+        return jsonify({"ok": False, "result": "Field 'tool' is required"}), 400
+
+    if not isinstance(args, dict):
+        return jsonify({"ok": False, "result": "Field 'args' must be an object"}), 400
+
+    if _command_dispatcher is None:
+        return jsonify({"ok": False, "result": "Command dispatcher unavailable"}), 503
+
+    start = time.time()
+    tool = tool.strip()
+
+    # Mirror legacy semantics for UI-originating calls.
+    if _event_bus is not None:
+        _event_bus.emit(
+            "tool_call",
+            {
+                "tool_name": tool,
+                "arguments": args,
+                "origin": "ui",
+            },
+        )
+    else:
+        publish_event(
+            {
+                "type": "tool_call",
+                "data": {"tool_name": tool, "arguments": args, "origin": "ui"},
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            }
+        )
+
+    try:
+        result = _command_dispatcher(tool, args)
+        result_text = str(result)
+        success = not (
+            result_text.startswith("Unknown tool:")
+            or result_text.startswith("Tool execution failed:")
+        )
+    except Exception as exc:
+        success = False
+        result_text = f"Tool execution failed: {exc}"
+
+    duration_ms = int((time.time() - start) * 1000)
+
+    if _event_bus is not None:
+        _event_bus.emit(
+            "tool_result",
+            {
+                "tool_name": tool,
+                "success": success,
+                "result": result_text,
+                "duration_ms": duration_ms,
+                "origin": "ui",
+            },
+        )
+    else:
+        publish_event(
+            {
+                "type": "tool_result",
+                "data": {
+                    "tool_name": tool,
+                    "success": success,
+                    "result": result_text,
+                    "duration_ms": duration_ms,
+                    "origin": "ui",
+                },
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            }
+        )
+
+    return jsonify({"ok": success, "result": result_text})
+
+
+@app.route("/api/health")
+def api_health():
+    return jsonify(
+        {
+            "status": "ok",
+            "frontend_dist": FRONTEND_DIST_DIR.exists(),
+            "sse_clients": len(_sse_clients),
+            "command_ready": _command_dispatcher is not None,
+        }
+    )
+
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def dashboard(path: str):
+    """
+    Serve built React app from frontend/dist. If absent, render fallback HTML.
+    """
+    if FRONTEND_DIST_DIR.exists() and (FRONTEND_DIST_DIR / "index.html").exists():
+        candidate = FRONTEND_DIST_DIR / path
+        if path and candidate.exists() and candidate.is_file():
+            return send_from_directory(FRONTEND_DIST_DIR, path)
+
+        # SPA fallback
+        return send_from_directory(FRONTEND_DIST_DIR, "index.html")
+
+    return render_template_string(DASHBOARD_HTML)
+
+
 def run_dashboard(host="0.0.0.0", port=5000):
-    """Run the dashboard in a background thread."""
-    # Quiet Flask logging
+    """Run dashboard/server in Flask dev server (threaded)."""
     import logging
-    log = logging.getLogger('werkzeug')
+
+    log = logging.getLogger("werkzeug")
     log.setLevel(logging.ERROR)
-    
+
     app.run(host=host, port=port, threaded=True, use_reloader=False)
 
+
 def start_dashboard_thread(host="0.0.0.0", port=5000):
-    """Start the dashboard in a background thread."""
+    """Start dashboard/server in a background thread."""
     thread = threading.Thread(target=run_dashboard, args=(host, port), daemon=True)
     thread.start()
     print(f"[DASHBOARD] Started at http://{host}:{port}")

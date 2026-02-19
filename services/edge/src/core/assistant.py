@@ -74,6 +74,21 @@ class Assistant:
         # Wakeword phrases to strip from transcript before LLM
         wakeword_raw = os.getenv("WAKEWORD_PHRASES", "hey jarvis")
         self.wakeword_phrases = [p.strip().lower() for p in wakeword_raw.split(",") if p.strip()]
+        self.wakeword_strip_phrases = list(self.wakeword_phrases)
+        # Common STT confusion for "Jarvis" on some mics/models.
+        if any("jarvis" in phrase for phrase in self.wakeword_phrases):
+            self.wakeword_strip_phrases.extend(["hey travis", "travis"])
+        strip_alias_raw = os.getenv("WAKEWORD_STRIP_ALIASES", "").strip()
+        if strip_alias_raw:
+            self.wakeword_strip_phrases.extend(
+                [p.strip().lower() for p in strip_alias_raw.split(",") if p.strip()]
+            )
+        # Prefer longer phrases first ("hey jarvis" before "jarvis").
+        self.wakeword_strip_phrases = sorted(
+            set(self.wakeword_strip_phrases),
+            key=len,
+            reverse=True,
+        )
         
 
         # 4. TTS Configuration
@@ -291,9 +306,14 @@ class Assistant:
         if not text:
             return text
         stripped = text.strip()
-        for phrase in self.wakeword_phrases:
-            pattern = rf"^{re.escape(phrase)}[\\s,;:!?.-]*"
-            updated = re.sub(pattern, "", stripped, flags=re.IGNORECASE)
+        for phrase in self.wakeword_strip_phrases:
+            tokens = re.findall(r"[a-z0-9']+", phrase.lower())
+            if not tokens:
+                continue
+            # Accept punctuation/variable spacing between wakeword tokens.
+            joiner = r"[\s,;:!?.-]+"
+            pattern = rf"^\W*{joiner.join(re.escape(token) for token in tokens)}(?:[\s,;:!?.-]+|$)"
+            updated = re.sub(pattern, "", stripped, flags=re.IGNORECASE, count=1)
             if updated != stripped:
                 return updated.strip()
         return stripped

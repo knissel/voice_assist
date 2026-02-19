@@ -1,5 +1,6 @@
 .recipePanel {
-    background: var(--bg-secondary);
+    background: linear-gradient(180deg, rgba(17, 27, 46, 0.86), rgba(13, 20, 34, 0.9));
+    border: 1px solid var(--border-color);
     border-radius: 20px;
     padding: 20px;
     display: flex;
@@ -7,6 +8,10 @@
     overflow: hidden;
     min-height: 0;
     flex: 1;
+}
+
+.toolPanel {
+    min-height: 320px;
 }
 
 .panelHeader {
@@ -114,6 +119,10 @@
     font-size: 13px;
 }
 
+.ingredientName {
+    color: var(--text-primary);
+}
+
 .ingredientAmount {
     font-variant-numeric: tabular-nums;
 }
@@ -152,6 +161,62 @@
 .recipeUpdated {
     font-size: 10px;
     color: var(--text-secondary);
+}
+
+.calendarList {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.calendarEvent {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 10px;
+    background: rgba(11, 17, 31, 0.5);
+}
+
+.calendarTime {
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--accent-cyan);
+    margin-bottom: 4px;
+}
+
+.calendarTitle {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.calendarLocation {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.calendarEmpty {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.genericBody {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.genericData {
+    margin: 0;
+    border-radius: 10px;
+    padding: 10px;
+    font-size: 11px;
+    line-height: 1.45;
+    overflow: auto;
+    border: 1px solid rgba(128, 145, 185, 0.35);
+    background: rgba(10, 16, 31, 0.75);
+    color: #b8d4ff;
 }
 
 .noRecipe {

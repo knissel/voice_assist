@@ -1,38 +1,32 @@
-/* Ported from legacy/ui/index.html */
 :root {
-  --bg-primary: #0a0a0f;
-  --bg-secondary: #12121a;
-  --bg-card: #1a1a24;
-  --text-primary: #ffffff;
-  --text-secondary: #a0a0b0;
-  --accent-cyan: #22d3ee;
-  --accent-blue: #3b82f6;
-  --accent-green: #22c55e;
-  --accent-orange: #f97316;
-  --accent-red: #ef4444;
-  --accent-purple: #a855f7;
-  --border-color: #2a2a3a;
-}
+  --bg-primary: #080d17;
+  --bg-secondary: #111a2d;
+  --bg-card: #152138;
+  --bg-raised: #1a2945;
 
-body {
-  margin: 0;
-  padding: 0;
-  font-family: "DIN 2014", "DIN Alternate", "Avenir Next", "Noto Sans", "Liberation Sans", sans-serif;
-  background:
-    radial-gradient(1200px 700px at 10% -20%, rgba(34, 211, 238, 0.18), transparent 60%),
-    radial-gradient(900px 500px at 90% 10%, rgba(59, 130, 246, 0.18), transparent 60%),
-    var(--bg-primary);
-  color: var(--text-primary);
-  min-height: 100vh;
-  overflow: hidden;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
+  --text-primary: #ecf3ff;
+  --text-secondary: #97a8c7;
+
+  --accent-cyan: #00d7ff;
+  --accent-blue: #48a7ff;
+  --accent-green: #2ee6a9;
+  --accent-orange: #ff8b3d;
+  --accent-red: #ff6d82;
+  --accent-purple: #9f7eff;
+
+  --border-color: rgba(136, 154, 196, 0.28);
+
+  --accent-primary: var(--accent-cyan);
+  --accent-secondary: var(--accent-orange);
+  --accent-danger: var(--accent-red);
+  --accent-warn: var(--accent-orange);
+  --text-muted: var(--text-secondary);
 }
 
 * {
   box-sizing: border-box;
   scrollbar-width: thin;
-  scrollbar-color: var(--accent-blue) var(--bg-secondary);
+  scrollbar-color: rgba(85, 132, 209, 0.8) rgba(12, 17, 31, 0.95);
 }
 
 *::-webkit-scrollbar {
@@ -41,62 +35,128 @@ body {
 }
 
 *::-webkit-scrollbar-track {
-  background: var(--bg-secondary);
+  background: rgba(12, 17, 31, 0.95);
   border-radius: 999px;
 }
 
 *::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #2f3b66, #3b82f6);
+  background: linear-gradient(180deg, rgba(72, 167, 255, 0.9), rgba(0, 215, 255, 0.65));
   border-radius: 999px;
-  border: 2px solid var(--bg-secondary);
+  border: 2px solid rgba(12, 17, 31, 0.95);
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #3c4a7a, #60a5fa);
+  background: linear-gradient(180deg, rgba(72, 167, 255, 1), rgba(0, 215, 255, 0.85));
 }
 
-*::-webkit-scrollbar-corner {
-  background: var(--bg-secondary);
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
 }
 
-/* Utilities */
-.is-hidden {
-  opacity: 0;
-  pointer-events: none;
+body {
+  margin: 0;
+  padding: 0;
+  color: var(--text-primary);
+  background:
+    radial-gradient(1400px 700px at 8% -20%, rgba(0, 215, 255, 0.2), transparent 60%),
+    radial-gradient(1050px 650px at 95% 0%, rgba(255, 139, 61, 0.15), transparent 62%),
+    linear-gradient(180deg, #070b14 0%, #080d17 38%, #070a13 100%);
+  font-family: 'Space Grotesk', 'Avenir Next Condensed', 'Avenir Next', 'Trebuchet MS', sans-serif;
+  overflow: hidden;
+  touch-action: manipulation;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Animations */
+button,
+input,
+textarea {
+  font: inherit;
+}
+
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 @keyframes pulse-fast {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.2); opacity: 0.7; }
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.75;
+  }
 }
 
 @keyframes wakeword-flash {
-  0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.9), 0 0 0 rgba(34, 211, 238, 0.0); }
-  100% { box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.0), 0 0 18px rgba(34, 211, 238, 0.0); }
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 215, 255, 0.9), 0 0 0 rgba(0, 215, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 2px rgba(0, 215, 255, 0), 0 0 18px rgba(0, 215, 255, 0);
+  }
 }
 
 @keyframes slideIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes urgentPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4); }
-  50% { box-shadow: 0 0 0 8px rgba(249, 115, 22, 0); }
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 139, 61, 0.42);
+  }
+  50% {
+    box-shadow: 0 0 0 9px rgba(255, 139, 61, 0);
+  }
 }
 
 @keyframes modalIn {
-  from { opacity: 0; transform: scale(0.9); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateX(-50%) translateY(20px); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

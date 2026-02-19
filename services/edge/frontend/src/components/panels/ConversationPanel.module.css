@@ -1,5 +1,6 @@
 .conversationPanel {
-    background: var(--bg-secondary);
+    background: linear-gradient(180deg, rgba(17, 27, 46, 0.86), rgba(13, 20, 34, 0.9));
+    border: 1px solid var(--border-color);
     border-radius: 20px;
     padding: 20px;
     display: flex;
@@ -91,6 +92,13 @@
     background: var(--bg-card);
     align-self: flex-start;
     border-bottom-left-radius: 4px;
+}
+
+.message.system {
+    background: rgba(26, 41, 68, 0.75);
+    border-left: 3px solid var(--accent-cyan);
+    font-size: 13px;
+    color: var(--text-secondary);
 }
 
 .message.tool {

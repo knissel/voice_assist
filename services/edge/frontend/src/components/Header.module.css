@@ -1,142 +1,181 @@
 .header {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 68px;
+  border: 1px solid var(--border-color);
+  border-radius: 18px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, rgba(17, 27, 46, 0.86), rgba(12, 18, 32, 0.92));
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
 }
 
-.logo {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+.branding {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
 .logoIcon {
-    width: 40px;
-    height: 40px;
-    background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    font-weight: bold;
-    color: white;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #e7f7ff;
+  background: linear-gradient(160deg, rgba(0, 215, 255, 0.9), rgba(72, 167, 255, 0.72));
+  box-shadow: 0 8px 22px rgba(0, 169, 255, 0.35);
 }
 
 .logoText {
-    font-size: 24px;
-    font-weight: 600;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1.05;
+}
+
+.logoSubtext {
+  font-size: 10px;
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-secondary);
 }
 
 .statusBadge {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
-    background: var(--bg-card);
-    border-radius: 20px;
-    font-size: 14px;
-    font-weight: 500;
-    transition: box-shadow 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+  background: rgba(17, 27, 45, 0.8);
 }
 
 .statusDot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--text-secondary);
-    transition: background-color 0.3s ease;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-secondary);
 }
 
-/* State Classes */
-.listening .statusDot {
-    background: var(--accent-red);
-    animation: pulse-fast 0.5s infinite;
+.statusDot.listening,
+.statusDot.recording {
+  background: var(--accent-red);
+  box-shadow: 0 0 12px rgba(255, 109, 130, 0.75);
+  animation: pulse-fast 0.52s infinite;
 }
 
-.thinking .statusDot,
-.transcribing .statusDot,
-.executing .statusDot {
-    background: var(--accent-blue);
-    animation: pulse-fast 0.8s infinite;
+.statusDot.thinking,
+.statusDot.processing,
+.statusDot.transcribing,
+.statusDot.executing,
+.statusDot.thinking_local {
+  background: var(--accent-cyan);
+  box-shadow: 0 0 12px rgba(0, 215, 255, 0.65);
+  animation: pulse-fast 0.85s infinite;
 }
 
-.speaking .statusDot {
-    background: var(--accent-purple);
-    animation: pulse-fast 0.6s infinite;
+.statusDot.speaking {
+  background: var(--accent-green);
+  box-shadow: 0 0 12px rgba(46, 230, 169, 0.7);
+  animation: pulse-fast 0.62s infinite;
+}
+
+.statusDot.error {
+  background: var(--accent-red);
 }
 
 .wakeword {
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.8), 0 0 12px rgba(34, 211, 238, 0.35);
-    animation: wakeword-flash 0.6s ease-out;
+  box-shadow: 0 0 0 2px rgba(0, 215, 255, 0.75), 0 0 14px rgba(0, 215, 255, 0.35);
+  animation: wakeword-flash 0.6s ease-out;
 }
 
-/* Header Timer */
 .headerTimer {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 8px 16px;
-    min-width: 180px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-primary);
-    letter-spacing: 0.3px;
-    transition: opacity 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: rgba(15, 24, 41, 0.82);
+  padding: 7px 12px;
+  min-width: 180px;
+  transition: opacity 0.2s ease;
 }
 
 .isHidden {
-    opacity: 0;
-    pointer-events: none;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .headerTimerIcon {
-    width: 18px;
-    height: 18px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+  width: 17px;
+  height: 17px;
+  color: var(--accent-orange);
 }
 
 .headerTimerIcon svg {
-    width: 100%;
-    height: 100%;
-    stroke: currentColor;
+  width: 100%;
+  height: 100%;
+  stroke: currentColor;
 }
 
 .headerTimerText {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 220px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
-@media (max-width: 760px) {
-    .header {
-        grid-template-columns: 1fr auto;
-        grid-template-rows: auto auto;
-    }
+@media (max-width: 960px) {
+  .header {
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 10px;
+  }
 
-    .logo {
-        grid-column: 1 / 2;
-        grid-row: 1;
-    }
+  .branding {
+    grid-column: 1 / 2;
+    grid-row: 1;
+  }
 
-    .statusBadge {
-        grid-column: 2 / 3;
-        grid-row: 1;
-        justify-self: end;
-    }
+  .statusBadge {
+    grid-column: 2 / 3;
+    grid-row: 1;
+    justify-self: end;
+  }
 
-    .headerTimer {
-        grid-column: 1 / -1;
-        grid-row: 2;
-        justify-self: center;
-    }
+  .headerTimer {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: center;
+  }
+}
+
+@media (max-width: 580px) {
+  .logoText {
+    font-size: 18px;
+  }
+
+  .logoSubtext {
+    font-size: 9px;
+  }
+
+  .statusBadge {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+  }
 }

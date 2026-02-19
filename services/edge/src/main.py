@@ -36,7 +36,12 @@ from core.event_bus import (
 )
 from core.assistant import Assistant
 from tools.audio import pause_media, resume_media
-from dashboard import update_state as update_dashboard_state
+from dashboard import (
+    update_state as update_dashboard_state,
+    set_event_bus as set_dashboard_event_bus,
+    set_command_dispatcher as set_dashboard_command_dispatcher,
+)
+from tools.registry import dispatch_tool
 from tools.respeaker import RespeakerSettings, apply_settings as apply_respeaker_settings
 from tools.respeaker_led import RespeakerLedConfig, RespeakerLedController
 
@@ -56,7 +61,7 @@ WAKEWORD_FRAME_LENGTH = int(os.getenv("WAKEWORD_FRAME_LENGTH", "1280"))
 WAKEWORD_VAD_GATE = os.getenv("WAKEWORD_VAD_GATE", "true").strip().lower() in {"1", "true", "yes", "on"}
 WAKEWORD_DEBOUNCE_FRAMES = max(1, int(os.getenv("WAKEWORD_DEBOUNCE_FRAMES", "2")))
 WAKEWORD_BUFFER_FRAMES = max(3, int(os.getenv("WAKEWORD_BUFFER_FRAMES", "5")))
-WAKEWORD_FEED_FRAMES = max(1, int(os.getenv("WAKEWORD_FEED_FRAMES", "3")))
+WAKEWORD_FEED_FRAMES = max(1, int(os.getenv("WAKEWORD_FEED_FRAMES", "1")))
 WAKEWORD_POST_DETECT_TIMEOUT = float(os.getenv("WAKEWORD_POST_DETECT_TIMEOUT", "2.0"))
 WAKEWORD_FALSE_TRIGGER_COOLDOWN_SECONDS = float(
     os.getenv("WAKEWORD_FALSE_TRIGGER_COOLDOWN_SECONDS", str(WAKEWORD_COOLDOWN_SECONDS))
@@ -71,6 +76,7 @@ VAD_MIN_RECORD_SECONDS = float(os.getenv("VAD_MIN_RECORD_SECONDS", "1.0")) # Min
 VAD_SPEECH_THRESHOLD = float(os.getenv("VAD_SPEECH_THRESHOLD", "0.5"))
 WAKEWORD_VAD_THRESHOLD = float(os.getenv("WAKEWORD_VAD_THRESHOLD", str(VAD_SPEECH_THRESHOLD)))
 WAKEWORD_MIN_RMS = float(os.getenv("WAKEWORD_MIN_RMS", "0"))
+MIC_GAIN = max(0.1, float(os.getenv("MIC_GAIN", "1.0")))
 
 # === UTILS ===
 def _resolve_wakeword_models(models: list[str], repo_root: str) -> list[str]:
@@ -147,6 +153,8 @@ class EdgeAssistant:
         self.state = AudioRecorderState.LISTENING
         self.bus = EventBus()
         self.bus.start()
+        set_dashboard_event_bus(self.bus)
+        set_dashboard_command_dispatcher(dispatch_tool)
         
         self.repo_root = os.path.dirname(os.path.abspath(__file__))
         
@@ -294,8 +302,14 @@ class EdgeAssistant:
             f"| effective_threshold={WAKEWORD_EFFECTIVE_THRESHOLD} "
             f"| debounce={WAKEWORD_DEBOUNCE_FRAMES} | feed_frames={WAKEWORD_FEED_FRAMES} "
             f"| buffer_frames={WAKEWORD_BUFFER_FRAMES} | vad_gate={WAKEWORD_VAD_GATE} "
+            f"| min_rms={WAKEWORD_MIN_RMS} | mic_gain={MIC_GAIN} "
             f"| false_trigger_cooldown={WAKEWORD_FALSE_TRIGGER_COOLDOWN_SECONDS}"
         )
+        if WAKEWORD_FEED_FRAMES > 1:
+            print(
+                "[WAKE][WARN] WAKEWORD_FEED_FRAMES>1 is not recommended for openwakeword; "
+                "runtime uses single-frame scoring."
+            )
 
     def _setup_vad(self):
         vad_path = os.path.join(self.repo_root, "models", "silero_vad.jit")
@@ -447,6 +461,11 @@ class EdgeAssistant:
                 pcm = pcm.reshape(-1, self.input_channels).mean(axis=1).astype(np.int16)
                 pcm_bytes = pcm.tobytes()
 
+            # Optional gain to compensate for low input levels.
+            if MIC_GAIN != 1.0:
+                pcm = np.clip(pcm.astype(np.float32) * MIC_GAIN, -32768, 32767).astype(np.int16)
+                pcm_bytes = pcm.tobytes()
+
             if self.state == AudioRecorderState.LISTENING:
                 if self._wakeword_suppressed():
                     self._wakeword_audio_buffer.clear()
@@ -455,36 +474,35 @@ class EdgeAssistant:
                 
                 pre_roll_buffer.append(pcm_bytes)
                 self._wakeword_audio_buffer.append(pcm)
-                if WAKEWORD_MIN_RMS > 0:
-                    rms = float(np.sqrt(np.mean(pcm.astype(np.float32) ** 2)))
-                    if rms < WAKEWORD_MIN_RMS:
-                        self._wakeword_hits.clear()
-                        await asyncio.sleep(0.001)
-                        continue
+                # Keep low-RMS as a prior instead of hard-blocking detection.
+                # Some setups (especially PipeWire virtual devices) produce low
+                # average RMS even when wakeword is intelligible.
+                rms = float(np.sqrt(np.mean(pcm.astype(np.float32) ** 2)))
+                low_rms = WAKEWORD_MIN_RMS > 0 and rms < WAKEWORD_MIN_RMS
+                speech_now = True
                 if WAKEWORD_VAD_GATE:
                     speech_now = is_speech(pcm, WAKEWORD_VAD_THRESHOLD)
-                    if not speech_now:
-                        self._wakeword_hits.clear()
-                        await asyncio.sleep(0.001)
-                        continue
                 
-                # Predict
-                feed = pcm
-                feed_frames = min(WAKEWORD_FEED_FRAMES, WAKEWORD_BUFFER_FRAMES)
-                if len(self._wakeword_audio_buffer) >= feed_frames:
-                     feed = np.concatenate(list(self._wakeword_audio_buffer)[-feed_frames:])
-                
-                scores = self.wakeword_detector.predict(feed)
-                found = scores and max(scores.values()) >= WAKEWORD_EFFECTIVE_THRESHOLD
+                # Predict on a single 80ms frame. openwakeword tracks context internally;
+                # concatenating multiple frames here can suppress scores.
+                scores = self.wakeword_detector.predict(pcm)
+                best_score = max(scores.values()) if scores else 0.0
+                score_threshold = WAKEWORD_EFFECTIVE_THRESHOLD
+                if WAKEWORD_VAD_GATE and not speech_now:
+                    # Require higher confidence when VAD says "no speech" to limit false positives.
+                    score_threshold = min(0.95, WAKEWORD_EFFECTIVE_THRESHOLD + 0.12)
+                if low_rms:
+                    # When signal level is low, keep detection possible but stricter.
+                    score_threshold = min(0.95, score_threshold + 0.08)
+                found = bool(scores) and best_score >= score_threshold
                 if self._wakeword_debug and scores:
                     now = time.time()
                     if now - self._wakeword_debug_last >= 0.5:
                         label, score = max(scores.items(), key=lambda kv: kv[1])
-                        rms = float(np.sqrt(np.mean(pcm.astype(np.float32) ** 2)))
                         print(
                             f"[WAKE][DEBUG] best={label} score={score:.3f} "
-                            f"threshold={WAKEWORD_EFFECTIVE_THRESHOLD:.3f} rms={rms:.1f} "
-                            f"hits={len(self._wakeword_hits)}/{WAKEWORD_DEBOUNCE_FRAMES}"
+                            f"threshold={score_threshold:.3f} rms={rms:.1f} speech={speech_now} "
+                            f"low_rms={low_rms} hits={len(self._wakeword_hits)}/{WAKEWORD_DEBOUNCE_FRAMES}"
                         )
                         self._wakeword_debug_last = now
                 if found:
@@ -496,6 +514,9 @@ class EdgeAssistant:
                 if ready and not self.is_processing:
                     self._wakeword_hits.clear()
                     print(f"[WAKE] Wake Word Detected!")
+                    keyword = WAKEWORD_MODELS[0].strip() if WAKEWORD_MODELS else "wakeword"
+                    self.bus.emit("wakeword_detected", {"keyword": keyword})
+                    emit_state_changed(self.bus, "listening", "recording")
                     pause_media()
                     self.state = AudioRecorderState.RECORDING
                     self._set_status("recording")
