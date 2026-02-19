@@ -9,6 +9,31 @@ cd /home/kenny/voice_assist
 .venv/bin/python services/edge/src/main.py
 ```
 
+## EDGE_MODE (local vs hybrid)
+
+Set in `.env`:
+
+```bash
+# Default: use remote Whisper first, local fallback
+EDGE_MODE=hybrid
+
+# Local-only mode (no 5090 dependency for STT/TTS paths)
+# EDGE_MODE=local
+```
+
+Mode behavior:
+- `EDGE_MODE=hybrid`: remote Whisper (`WHISPER_REMOTE_URL`) first, local whisper.cpp fallback.
+- `EDGE_MODE=local`: local whisper.cpp only, and startup fails fast if local whisper binary/model are missing.
+
+If using local-only mode, do not set `TTS_PROVIDER=gpu`; use `TTS_PROVIDER=pocket` or `TTS_PROVIDER=local`.
+
+Apply changes:
+
+```bash
+systemctl --user restart voice-assistant-edge.service
+journalctl --user -u voice-assistant-edge.service -f
+```
+
 ## mDNS Hostname (easy DNS on LAN)
 
 Give the edge box a friendly hostname and use `<hostname>.local` instead of IPs.

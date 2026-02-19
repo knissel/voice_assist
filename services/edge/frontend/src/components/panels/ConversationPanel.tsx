@@ -61,7 +61,13 @@ const formatToolMessage = (msg: any) => {
 
     if (name === 'control_home_lighting' && args) {
         if (args.device_id === 999) {
-            text = args.brightness === 0 ? 'All lights off' : 'All lights on';
+            if (args.brightness === 0) {
+                text = 'All lights off';
+            } else if (args.brightness === 100) {
+                text = 'All lights on';
+            } else {
+                text = `All lights -> ${args.brightness}%`;
+            }
         } else {
             text = `Light ${args.device_id} -> ${args.brightness}%`;
         }

@@ -7,6 +7,9 @@ import subprocess
 import requests
 from typing import Optional
 import logging
+from pathlib import Path
+
+from core.runtime_mode import EDGE_MODE_LOCAL, resolve_edge_mode
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -179,27 +182,43 @@ class TranscriptionService:
 
 def create_transcription_service() -> TranscriptionService:
     """Create transcription service from environment variables."""
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # transcription.py -> tools -> src -> edge -> services -> repo root
+    repo_root = Path(__file__).resolve().parents[4]
+    edge_mode = resolve_edge_mode()
     
     # Remote server configuration
-    remote_url = os.getenv("WHISPER_REMOTE_URL")  # e.g., "http://192.168.1.100:5000"
+    remote_url = os.getenv("WHISPER_REMOTE_URL") if edge_mode != EDGE_MODE_LOCAL else None
     
     # Local fallback configuration
-    default_whisper_path = os.path.join(repo_root, "whisper.cpp", "build", "bin", "whisper-cli")
+    default_whisper_path = os.path.join(str(repo_root), "whisper.cpp", "build", "bin", "whisper-cli")
     if os.name == "nt":
         exe_path = f"{default_whisper_path}.exe"
         if os.path.exists(exe_path):
             default_whisper_path = exe_path
-    default_model_path = os.path.join(repo_root, "whisper.cpp", "models", "ggml-tiny.bin")
+    default_model_path = os.path.join(str(repo_root), "whisper.cpp", "models", "ggml-tiny.bin")
     
     def _resolve_path(env_value: Optional[str], fallback: str) -> str:
         """Prefer env path when it exists; otherwise use fallback."""
         if env_value and os.path.exists(env_value):
             return env_value
+        if env_value and not os.path.exists(env_value):
+            logger.warning("Configured path not found (%s); falling back to %s", env_value, fallback)
         return fallback
 
     local_whisper_path = _resolve_path(os.getenv("WHISPER_PATH"), default_whisper_path)
     local_model_path = _resolve_path(os.getenv("MODEL_PATH"), default_model_path)
+
+    if edge_mode == EDGE_MODE_LOCAL:
+        missing = []
+        if not os.path.exists(local_whisper_path):
+            missing.append(f"whisper binary: {local_whisper_path}")
+        if not os.path.exists(local_model_path):
+            missing.append(f"model file: {local_model_path}")
+        if missing:
+            raise RuntimeError(
+                "EDGE_MODE=local requires local whisper.cpp assets. Missing: "
+                + "; ".join(missing)
+            )
     
     return TranscriptionService(
         remote_url=remote_url,
