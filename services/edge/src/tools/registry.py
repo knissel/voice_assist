@@ -15,6 +15,7 @@ from tools.audio import route_to_bluetooth, set_audio_sink, get_audio_sinks, con
 from tools.youtube_music import play_youtube_music, stop_music
 from tools.timer import set_timer, cancel_timer, list_timers, check_timer
 from tools.recipes import pizza_dough_recipe
+from tools.weather import get_weather
 try:
     from tools.calendar import tool_get_agenda, tool_add_event
 except Exception as exc:
@@ -198,6 +199,23 @@ GEMINI_TOOLS = [
                         "cold_ferment_hours": types.Schema(type="NUMBER", description="Cold ferment duration in hours"),
                         "room_temp_hours": types.Schema(type="NUMBER", description="Room temperature proof duration in hours"),
                         "use_last": types.Schema(type="BOOLEAN", description="Use last recipe as base when fields are omitted")
+                    },
+                    required=[]
+                )
+            ),
+            types.FunctionDeclaration(
+                name="get_weather",
+                description=(
+                    "Get the current weather and today's high/low for a location. "
+                    "Returns a short fixed-format sentence optimized for TTS."
+                ),
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "location": types.Schema(
+                            type="STRING",
+                            description="Optional city or location (for example: 'Charlotte, NC')."
+                        )
                     },
                     required=[]
                 )
@@ -461,6 +479,23 @@ TOOL_SPECS = [
     {
         "type": "function",
         "function": {
+            "name": "get_weather",
+            "description": "Get current weather and today's high/low for a location. Returns a short fixed-format sentence optimized for TTS.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "Optional city or location (for example: 'Charlotte, NC')."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_calendar_agenda",
             "description": "Get the user's calendar agenda for today or this week.",
             "parameters": {
@@ -527,6 +562,7 @@ TOOL_FUNCTIONS = {
     "check_timer": check_timer,
     "list_timers": list_timers,
     "pizza_dough_recipe": pizza_dough_recipe,
+    "get_weather": get_weather,
     "get_calendar_agenda": tool_get_agenda,
     "add_calendar_event": tool_add_event
 }

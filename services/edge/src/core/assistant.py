@@ -245,6 +245,9 @@ class Assistant:
         else:
             # Default to Cloud (Gemini)
             response_text = self._process_gemini(transcript)
+
+        # Keep spoken weather in a single-unit format (Fahrenheit only).
+        response_text = self._remove_celsius_mentions(response_text)
         
         # 3. Speak (TTS)
         audio_bytes = None
@@ -276,6 +279,38 @@ class Assistant:
 
         latency_ms = int((time.time() - start_time) * 1000)
         return response_text, audio_bytes, latency_ms
+
+    def _remove_celsius_mentions(self, text: str) -> str:
+        """Remove Celsius values from assistant output (e.g., '67°F (19°C)' -> '67°F')."""
+        if not text:
+            return text
+
+        cleaned = text
+        # Remove parenthetical Celsius conversions.
+        cleaned = re.sub(
+            r"\s*\(\s*-?\d+(?:\.\d+)?\s*°?\s*(?:c|celsius)\s*\)",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        # Remove slash-separated Celsius values.
+        cleaned = re.sub(
+            r"\s*/\s*-?\d+(?:\.\d+)?\s*°?\s*(?:c|celsius)\b",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        # Remove standalone Celsius mentions.
+        cleaned = re.sub(
+            r"\b-?\d+(?:\.\d+)?\s*°?\s*(?:c|celsius)\b",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        # Cleanup spacing/punctuation after removals.
+        cleaned = re.sub(r"\s+", " ", cleaned)
+        cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+        return cleaned.strip()
 
     def _should_use_local_llm(self, text: str) -> bool:
         """Heuristic to decide if we can handle this locally."""
@@ -355,26 +390,37 @@ class Assistant:
                     self.memory.reset()
             
             use_history = self.memory is not None
+            lower_text = user_text.lower()
             
             # Simple keyword check for tool-heavy requests to skip history
             # (Optimization from legacy code)
-            tool_keywords = ['light', 'turn on', 'turn off', 'timer', 'volume', 'play', 'stop']
-            if any(k in user_text.lower() for k in tool_keywords):
+            tool_keywords = [
+                'light', 'turn on', 'turn off', 'timer', 'volume', 'play', 'stop',
+                'weather', 'forecast', 'temperature'
+            ]
+            if any(k in lower_text for k in tool_keywords):
                 use_history = False
 
             contents = self._build_contents(user_text, use_history)
             
             # Location Context (Hardcoded for now, can be env var later)
             location = "User is located in Charlotte, NC (zip code 28211)."
-            system_inst = f"You are Computer, a helpful voice assistant. {location} Keep answers short (1-2 sentences)."
+            system_inst = (
+                f"You are Computer, a helpful voice assistant. {location} "
+                "Keep answers short (1-2 sentences). "
+                "For weather, forecast, or temperature requests, always call get_weather. "
+                "If get_weather is called, return its result text exactly as provided."
+            )
 
             # Configure Tools
-            # For real-time info keywords, use Google Search
-            search_kw = ['weather', 'stock', 'news', 'who won', 'what time', 'current']
-            if any(k in user_text.lower() for k in search_kw) and not any(k in user_text.lower() for k in tool_keywords):
-                 tools = [types.Tool(google_search=types.GoogleSearch())]
+            weather_kw = ['weather', 'forecast', 'temperature']
+            search_kw = ['stock', 'news', 'who won', 'what time', 'current']
+            if any(k in lower_text for k in weather_kw):
+                tools = GEMINI_TOOLS
+            elif any(k in lower_text for k in search_kw) and not any(k in lower_text for k in tool_keywords):
+                tools = [types.Tool(google_search=types.GoogleSearch())]
             else:
-                 tools = GEMINI_TOOLS
+                tools = GEMINI_TOOLS
 
             # Call Gemini
             response = self.client.models.generate_content(
