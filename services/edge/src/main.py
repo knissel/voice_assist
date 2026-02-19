@@ -52,12 +52,17 @@ WAKEWORD_MODELS = os.getenv("WAKEWORD_MODELS", "hey_jarvis").split(",")
 WAKEWORD_THRESHOLD = float(os.getenv("WAKEWORD_THRESHOLD", "0.5"))
 WAKEWORD_COOLDOWN_SECONDS = float(os.getenv("WAKEWORD_COOLDOWN_SECONDS", "1.5"))
 WAKEWORD_SAMPLE_RATE = 16000
-WAKEWORD_FRAME_LENGTH = 1280
+WAKEWORD_FRAME_LENGTH = int(os.getenv("WAKEWORD_FRAME_LENGTH", "1280"))
 WAKEWORD_VAD_GATE = os.getenv("WAKEWORD_VAD_GATE", "true").strip().lower() in {"1", "true", "yes", "on"}
 WAKEWORD_DEBOUNCE_FRAMES = max(1, int(os.getenv("WAKEWORD_DEBOUNCE_FRAMES", "2")))
 WAKEWORD_BUFFER_FRAMES = max(3, int(os.getenv("WAKEWORD_BUFFER_FRAMES", "5")))
 WAKEWORD_FEED_FRAMES = max(1, int(os.getenv("WAKEWORD_FEED_FRAMES", "3")))
 WAKEWORD_POST_DETECT_TIMEOUT = float(os.getenv("WAKEWORD_POST_DETECT_TIMEOUT", "2.0"))
+WAKEWORD_FALSE_TRIGGER_COOLDOWN_SECONDS = float(
+    os.getenv("WAKEWORD_FALSE_TRIGGER_COOLDOWN_SECONDS", str(WAKEWORD_COOLDOWN_SECONDS))
+)
+WAKEWORD_MIN_TRIGGER_SCORE = float(os.getenv("WAKEWORD_MIN_TRIGGER_SCORE", "0.35"))
+WAKEWORD_EFFECTIVE_THRESHOLD = max(WAKEWORD_THRESHOLD, WAKEWORD_MIN_TRIGGER_SCORE)
 DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "5000"))
 VAD_SILENCE_SECONDS = float(os.getenv("VAD_SILENCE_SECONDS", "0.8"))
 VAD_GRACE_SECONDS = float(os.getenv("VAD_GRACE_SECONDS", "0.8"))
@@ -286,8 +291,10 @@ class EdgeAssistant:
         model_names = ", ".join(os.path.basename(p) for p in resolved) if resolved else "(none)"
         print(
             f"[WAKE] Models: {model_names} | threshold={WAKEWORD_THRESHOLD} "
+            f"| effective_threshold={WAKEWORD_EFFECTIVE_THRESHOLD} "
             f"| debounce={WAKEWORD_DEBOUNCE_FRAMES} | feed_frames={WAKEWORD_FEED_FRAMES} "
-            f"| buffer_frames={WAKEWORD_BUFFER_FRAMES} | vad_gate={WAKEWORD_VAD_GATE}"
+            f"| buffer_frames={WAKEWORD_BUFFER_FRAMES} | vad_gate={WAKEWORD_VAD_GATE} "
+            f"| false_trigger_cooldown={WAKEWORD_FALSE_TRIGGER_COOLDOWN_SECONDS}"
         )
 
     def _setup_vad(self):
@@ -468,7 +475,7 @@ class EdgeAssistant:
                      feed = np.concatenate(list(self._wakeword_audio_buffer)[-feed_frames:])
                 
                 scores = self.wakeword_detector.predict(feed)
-                found = scores and max(scores.values()) >= WAKEWORD_THRESHOLD
+                found = scores and max(scores.values()) >= WAKEWORD_EFFECTIVE_THRESHOLD
                 if self._wakeword_debug and scores:
                     now = time.time()
                     if now - self._wakeword_debug_last >= 0.5:
@@ -476,7 +483,7 @@ class EdgeAssistant:
                         rms = float(np.sqrt(np.mean(pcm.astype(np.float32) ** 2)))
                         print(
                             f"[WAKE][DEBUG] best={label} score={score:.3f} "
-                            f"threshold={WAKEWORD_THRESHOLD:.3f} rms={rms:.1f} "
+                            f"threshold={WAKEWORD_EFFECTIVE_THRESHOLD:.3f} rms={rms:.1f} "
                             f"hits={len(self._wakeword_hits)}/{WAKEWORD_DEBOUNCE_FRAMES}"
                         )
                         self._wakeword_debug_last = now
@@ -510,6 +517,9 @@ class EdgeAssistant:
                 elif not self._speech_seen:
                     if self._post_detect_deadline and time.time() > self._post_detect_deadline:
                         print("[WAKE] No speech after wakeword, returning to listening.")
+                        self._suppress_wakeword(WAKEWORD_FALSE_TRIGGER_COOLDOWN_SECONDS)
+                        self._wakeword_audio_buffer.clear()
+                        self._wakeword_hits.clear()
                         self.state = AudioRecorderState.LISTENING
                         emit_state_changed(self.bus, "recording", "listening")
                         continue
